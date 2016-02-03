@@ -50,7 +50,7 @@ shuffle g xs = elemDrawn : shuffle g' (xs' ++ ys')
     (rndIndex, g') = randomR (0, pred $ length xs) g
 
 shuffle2 :: StdGen -> [a] -> [a]
-shuffle2 g xs = toList $ shuffle2' g $ toMap xs
+shuffle2 g = toList . (shuffle2' g) . toMap
   where
     toMap = M.fromList . (zip [0 :: Int ..])
     shuffle2' g' m
@@ -60,7 +60,7 @@ shuffle2 g xs = toList $ shuffle2' g $ toMap xs
         (index, g'') = randomR (0, (pred $ M.size m)) g'
         elemDrawn = M.elemAt index m
         m' = M.deleteAt index m
-    toList xs' = map snd xs'
+    toList = map snd
 
 
 myTable :: [(String, String)]
