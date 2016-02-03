@@ -49,6 +49,20 @@ shuffle g xs = elemDrawn : shuffle g' (xs' ++ ys')
     (xs', elemDrawn : ys') = splitAt rndIndex xs
     (rndIndex, g') = randomR (0, pred $ length xs) g
 
+shuffle2 :: StdGen -> [a] -> [a]
+shuffle2 g xs = toList $ shuffle2' g $ toMap xs
+  where
+    toMap = M.fromList . (zip [0 :: Int ..])
+    shuffle2' g' m
+      | M.null m = []
+      | otherwise = elemDrawn : shuffle2' g'' m'
+      where
+        (index, g'') = randomR (0, (pred $ M.size m)) g'
+        elemDrawn = M.elemAt index m
+        m' = M.deleteAt index m
+    toList xs' = map snd xs'
+
+
 myTable :: [(String, String)]
 myTable = shuffle (mkStdGen 1) $ walk myTree
 
@@ -58,3 +72,6 @@ myMap = foldl (\m (e, parent) -> M.alter (f e) parent m
   where
     f e' (Just es) = Just $ e' : es
     f e' Nothing =  Just $ [e']
+
+myTrial :: [a] -> [a]
+myTrial = id
