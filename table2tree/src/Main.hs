@@ -2,7 +2,7 @@ module Main where
 
 import System.Random
 import qualified Data.Tree as T
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 
 type Level = Int
 type Name = String
@@ -50,17 +50,16 @@ shuffle g xs = elemDrawn : shuffle g' (xs' ++ ys')
     (rndIndex, g') = randomR (0, pred $ length xs) g
 
 shuffle2 :: StdGen -> [a] -> [a]
-shuffle2 g = toList . (shuffle2' g) . toMap
+shuffle2 g = (shuffle2' g) . toMap
   where
     toMap = M.fromList . (zip [0 :: Int ..])
     shuffle2' g' m
       | M.null m = []
-      | otherwise = elemDrawn : shuffle2' g'' m'
+      | otherwise = snd elemDrawn : shuffle2' g'' m'
       where
         (index, g'') = randomR (0, (pred $ M.size m)) g'
         elemDrawn = M.elemAt index m
         m' = M.deleteAt index m
-    toList = map snd
 
 
 myTable :: [(String, String)]
