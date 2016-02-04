@@ -1,3 +1,5 @@
 # haskell-adhoc
 
-Various stuff I try to write/experiment in Haskell
+Various stuff I try to write in Haskell while learning this
+beautiful language :-)
+
