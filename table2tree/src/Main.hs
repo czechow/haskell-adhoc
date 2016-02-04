@@ -2,12 +2,11 @@ module Main where
 
 import System.Random
 import qualified Data.Tree as T
-import qualified Data.Map.Strict as M
+import qualified Data.Map as M
+import qualified Data.List
 
 type Level = Int
 type Name = String
--- build root
--- build forest => 3 elements
 
 -- Take 1:
 treeBuilder :: (Name, Level, StdGen) -> (String, [(Name, Level, StdGen)])
@@ -25,7 +24,6 @@ treeBuilder (name, level, gen)
 myTree :: T.Tree String
 myTree = T.unfoldTree treeBuilder ("R", 4, mkStdGen 2)
 
--- FIXME: monoid here may be too much...
 walk :: T.Tree a -> [(a, a)]
 walk t@(T.Node nme _) = (nme, nme) : walk' t []
   where
@@ -57,7 +55,7 @@ shuffle2 g = (shuffle2' g) . toMap
       | M.null m = []
       | otherwise = snd elemDrawn : shuffle2' g'' m'
       where
-        (index, g'') = randomR (0, (pred $ M.size m)) g'
+        (index, g'') = randomR (0, pred $ M.size m) g'
         elemDrawn = M.elemAt index m
         m' = M.deleteAt index m
 
@@ -72,5 +70,16 @@ myMap = foldl (\m (e, parent) -> M.alter (f e) parent m
     f e' (Just es) = Just $ e' : es
     f e' Nothing =  Just $ [e']
 
-myTrial :: [a] -> [a]
-myTrial = id
+
+checkShuffle :: StdGen -> [Int] -> Bool
+checkShuffle _ [] = True
+checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
+  where
+    n = 10000
+    gens = take n $ iterate (snd . next) g
+    xxs = map (flip shuffle2 xs) gens
+    sums = map sum $ Data.List.transpose xxs
+    avg = sum sums `quot` length sums
+    diffs = map (subtract avg) sums
+    sumsRo2 = sum $ map (^(2 :: Int)) diffs
+    var = sqrt $ fromIntegral $ sumsRo2 `quot` length sums
