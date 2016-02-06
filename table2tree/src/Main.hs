@@ -8,6 +8,9 @@ import qualified Data.List
 type Level = Int
 type Name = String
 
+type Parent = String
+type Child = String
+
 -- Take 1:
 treeBuilder :: (Name, Level, StdGen) -> (String, [(Name, Level, StdGen)])
 treeBuilder (name, level, gen)
@@ -31,7 +34,7 @@ walk t@(T.Node nme _) = (nme, nme) : walk' t []
     walk' (T.Node _ []) acc = acc
     walk' (T.Node name forest) acc =
       acc ++
-      map (\(T.Node n _) -> (n, name)) forest ++
+      map (\(T.Node n _) -> (name, n)) forest ++
       (concatMap (flip walk' acc) forest)
 
 
@@ -47,6 +50,7 @@ shuffle g xs = elemDrawn : shuffle g' (xs' ++ ys')
     (xs', elemDrawn : ys') = splitAt rndIndex xs
     (rndIndex, g') = randomR (0, pred $ length xs) g
 
+-- Shuffle with trees
 shuffle2 :: StdGen -> [a] -> [a]
 shuffle2 g = (shuffle2' g) . toMap
   where
@@ -60,17 +64,20 @@ shuffle2 g = (shuffle2' g) . toMap
         m' = M.deleteAt index m
 
 
-myTable :: [(String, String)]
+myTable :: [(Parent, Child)]
 myTable = shuffle (mkStdGen 1) $ walk myTree
 
 myMap :: M.Map String [String]
-myMap = foldl (\m (e, parent) -> M.alter (f e) parent m
-                ) M.empty myTable
+myMap = foldl (\m (e, parent) -> M.alter (f e) parent m) M.empty myTable
   where
     f e' (Just es) = Just $ e' : es
     f e' Nothing =  Just $ [e']
 
 
+-- FIXME: Any mathematical base for checking?
+-- convert this to more generic type
+-- Ideas:
+--   Shuffle many times, check frequencies (perhaps with a hashcode)
 checkShuffle :: StdGen -> [Int] -> Bool
 checkShuffle _ [] = True
 checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
@@ -83,3 +90,23 @@ checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
     diffs = map (subtract avg) sums
     sumsRo2 = sum $ map (^(2 :: Int)) diffs
     var = sqrt $ fromIntegral $ sumsRo2 `quot` length sums
+
+
+-- This is the core problem:
+-- With [(Parent, Child)] in our hands we need to locate
+buildDeps :: [(Parent, Child)] -> M.Map Parent [Child]
+buildDeps = foldl addToMap M.empty
+  where
+    addToMap m' (p', c') = M.alter (f c') p' m'
+    f e' (Just es) = Just $ e' : es
+    f e' Nothing = Just [e']
+
+
+deps = buildDeps myTable
+
+-- FIXME: cycle detection needed => here???
+queryDeps :: Parent -> M.Map Parent [Child] -> [(Parent, Child)]
+queryDeps arg m = case M.lookup arg m of
+  Just children -> map (\c -> (arg, c)) children ++
+                   concatMap (flip queryDeps m) (filter (arg /=) children)
+  Nothing -> []
