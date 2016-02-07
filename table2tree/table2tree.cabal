@@ -20,6 +20,7 @@ executable table2tree
   build-depends:       base
                      , random
                      , containers
+                     , mtl
   default-language:    Haskell2010
 
 -- test-suite table2tree-test

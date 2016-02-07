@@ -3,13 +3,19 @@ module Main where
 import System.Random
 import qualified Data.Tree as T
 import qualified Data.Map as M
-import qualified Data.List
+import qualified Data.List as L
+import qualified Data.Set as S
+
+import Control.Monad.State
 
 type Level = Int
 type Name = String
 
 type Parent = String
 type Child = String
+
+type Ent = String
+type BenchByEnt = String
 
 -- Take 1:
 treeBuilder :: (Name, Level, StdGen) -> (String, [(Name, Level, StdGen)])
@@ -27,16 +33,15 @@ treeBuilder (name, level, gen)
 myTree :: T.Tree String
 myTree = T.unfoldTree treeBuilder ("R", 4, mkStdGen 2)
 
-walk :: T.Tree a -> [(a, a)]
-walk t@(T.Node nme _) = (nme, nme) : walk' t []
+walk :: (Monoid a) => T.Tree a -> [(a, a)]
+walk t@(T.Node nme _) = (nme, mempty) : walk' t []
   where
-    walk' :: T.Tree a -> [(a, a)] -> [(a, a)]
-    walk' (T.Node _ []) acc = acc
+    walk' :: (Monoid b) => T.Tree b -> [(b, b)] -> [(b, b)]
+    walk' (T.Node name []) acc = acc ++ [(name, mempty)]
     walk' (T.Node name forest) acc =
       acc ++
       map (\(T.Node n _) -> (name, n)) forest ++
       (concatMap (flip walk' acc) forest)
-
 
 main :: IO ()
 main = putStrLn "Up and running" >>
@@ -64,7 +69,7 @@ shuffle2 g = (shuffle2' g) . toMap
         m' = M.deleteAt index m
 
 
-myTable :: [(Parent, Child)]
+myTable :: [(Ent, BenchByEnt)]
 myTable = shuffle (mkStdGen 1) $ walk myTree
 
 myMap :: M.Map String [String]
@@ -85,7 +90,7 @@ checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
     n = 10000
     gens = take n $ iterate (snd . next) g
     xxs = map (flip shuffle2 xs) gens
-    sums = map sum $ Data.List.transpose xxs
+    sums = map sum $ L.transpose xxs
     avg = sum sums `quot` length sums
     diffs = map (subtract avg) sums
     sumsRo2 = sum $ map (^(2 :: Int)) diffs
@@ -94,19 +99,51 @@ checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
 
 -- This is the core problem:
 -- With [(Parent, Child)] in our hands we need to locate
-buildDeps :: [(Parent, Child)] -> M.Map Parent [Child]
+buildDeps :: [(Ent, BenchByEnt)] -> M.Map Ent [BenchByEnt]
 buildDeps = foldl addToMap M.empty
   where
-    addToMap m' (p', c') = M.alter (f c') p' m'
-    f e' (Just es) = Just $ e' : es
-    f e' Nothing = Just [e']
+    addToMap m' (ent', bbent') = M.alter (f bbent') ent' m'
+    f x' (Just xs) = Just $ x' : xs
+    f x' Nothing = Just [x']
 
 
 deps = buildDeps myTable
 
 -- FIXME: cycle detection needed => here???
-queryDeps :: Parent -> M.Map Parent [Child] -> [(Parent, Child)]
-queryDeps arg m = case M.lookup arg m of
-  Just children -> map (\c -> (arg, c)) children ++
-                   concatMap (flip queryDeps m) (filter (arg /=) children)
-  Nothing -> []
+-- with a state monad
+-- queryDeps :: M.Map Ent [BenchByEnt] -> Ent ->  [(Ent, BenchByEnt)]
+-- queryDeps m arg = case M.lookup arg m of
+--   Just children -> map (\c -> (arg, c)) children ++
+--                    concatMap (queryDeps m) children
+--   Nothing -> []
+
+
+queryDeps2 :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
+queryDeps2 = queryDeps2' S.empty
+  where
+    queryDeps2' s m arg = case (S.member arg s, M.lookup arg m) of
+      (False, Just children) ->
+        map ((,) arg) children ++
+        concatMap (queryDeps2' (S.insert arg s) m) children
+      (_, _) -> [] -- This takes care of circular dependencies too
+
+
+-- now state monad, please
+queryDeps3 :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
+queryDeps3 m arg = evalState (queryDeps3' m arg) S.empty
+
+queryDeps3' :: M.Map Ent [BenchByEnt] ->
+               Ent ->
+               State (S.Set Ent) [(Ent, BenchByEnt)]
+queryDeps3' m arg = do
+  s <- get
+  case (S.member arg s, M.lookup arg m) of
+    (False, Just children) -> do
+      put $ S.insert arg s
+      -- This one is too complex to read:
+      -- liftM (((map ((,) arg) children)++) . concat)
+      --  (mapM (queryDeps3' m) children)
+      (++) <$>
+        return (map ((,) arg) children) <*>
+        liftM concat (mapM (queryDeps3' m) children)
+    (_, _) -> return [] -- This takes care of circular dependencies too
