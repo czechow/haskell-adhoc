@@ -11,9 +11,6 @@ import Control.Monad.State
 type Level = Int
 type Name = String
 
-type Parent = String
-type Child = String
-
 type Ent = String
 type BenchByEnt = String
 
@@ -109,22 +106,14 @@ buildDeps = foldl addToMap M.empty
 
 deps = buildDeps myTable
 
--- FIXME: cycle detection needed => here???
--- with a state monad
--- queryDeps :: M.Map Ent [BenchByEnt] -> Ent ->  [(Ent, BenchByEnt)]
--- queryDeps m arg = case M.lookup arg m of
---   Just children -> map (\c -> (arg, c)) children ++
---                    concatMap (queryDeps m) children
---   Nothing -> []
 
-
-queryDeps2 :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
-queryDeps2 = queryDeps2' S.empty
+queryDeps :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
+queryDeps = queryDeps' S.empty
   where
-    queryDeps2' s m arg = case (S.member arg s, M.lookup arg m) of
+    queryDeps' s m arg = case (S.member arg s, M.lookup arg m) of
       (False, Just children) ->
         map ((,) arg) children ++
-        concatMap (queryDeps2' (S.insert arg s) m) children
+        concatMap (queryDeps' (S.insert arg s) m) children
       (_, _) -> [] -- This takes care of circular dependencies too
 
 
