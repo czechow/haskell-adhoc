@@ -1,4 +1,4 @@
-module Main where
+module Lib where
 
 import System.Random
 import qualified Data.Tree as T
@@ -40,10 +40,6 @@ walk t@(T.Node nme _) = (nme, mempty) : walk' t []
       map (\(T.Node n _) -> (name, n)) forest ++
       (concatMap (flip walk' acc) forest)
 
-main :: IO ()
-main = putStrLn "Up and running" >>
-       putStrLn (T.drawTree myTree) >>
-       putStrLn "Finished"
 
 shuffle :: StdGen -> [a] -> [a]
 shuffle _ [] = []
@@ -118,6 +114,7 @@ queryDeps = queryDeps' S.empty
 
 
 -- now state monad, please
+-- This looks more complex than param passing (unless I am missing something)
 queryDeps3 :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
 queryDeps3 m arg = evalState (queryDeps3' m arg) S.empty
 
@@ -136,3 +133,5 @@ queryDeps3' m arg = do
         return (map ((,) arg) children) <*>
         liftM concat (mapM (queryDeps3' m) children)
     (_, _) -> return [] -- This takes care of circular dependencies too
+
+-- next step: add testing ???
