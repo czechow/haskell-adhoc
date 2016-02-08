@@ -3,7 +3,6 @@ module Lib where
 import System.Random
 import qualified Data.Tree as T
 import qualified Data.Map as M
-import qualified Data.List as L
 import qualified Data.Set as S
 
 import Control.Monad.State
@@ -72,22 +71,6 @@ myMap = foldl (\m (e, parent) -> M.alter (f e) parent m) M.empty myTable
     f e' Nothing =  Just $ [e']
 
 
--- FIXME: Any mathematical base for checking?
--- convert this to more generic type
--- Ideas:
---   Shuffle many times, check frequencies (perhaps with a hashcode)
-checkShuffle :: StdGen -> [Int] -> Bool
-checkShuffle _ [] = True
-checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
-  where
-    n = 10000
-    gens = take n $ iterate (snd . next) g
-    xxs = map (flip shuffle xs) gens
-    sums = map sum $ L.transpose xxs
-    avg = sum sums `quot` length sums
-    diffs = map (subtract avg) sums
-    sumsRo2 = sum $ map (^(2 :: Int)) diffs
-    var = sqrt $ fromIntegral $ sumsRo2 `quot` length sums
 
 
 -- This is the core problem:
