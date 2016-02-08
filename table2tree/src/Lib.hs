@@ -41,21 +41,21 @@ walk t@(T.Node nme _) = (nme, mempty) : walk' t []
       (concatMap (flip walk' acc) forest)
 
 
-shuffle :: StdGen -> [a] -> [a]
-shuffle _ [] = []
-shuffle g xs = elemDrawn : shuffle g' (xs' ++ ys')
+shuffle_slow :: StdGen -> [a] -> [a]
+shuffle_slow _ [] = []
+shuffle_slow g xs = elemDrawn : shuffle_slow g' (xs' ++ ys')
   where
     (xs', elemDrawn : ys') = splitAt rndIndex xs
     (rndIndex, g') = randomR (0, pred $ length xs) g
 
 -- Shuffle with trees
-shuffle2 :: StdGen -> [a] -> [a]
-shuffle2 g = (shuffle2' g) . toMap
+shuffle :: StdGen -> [a] -> [a]
+shuffle g = (shuffle' g) . toMap
   where
     toMap = M.fromList . (zip [0 :: Int ..])
-    shuffle2' g' m
+    shuffle' g' m
       | M.null m = []
-      | otherwise = snd elemDrawn : shuffle2' g'' m'
+      | otherwise = snd elemDrawn : shuffle' g'' m'
       where
         (index, g'') = randomR (0, pred $ M.size m) g'
         elemDrawn = M.elemAt index m
@@ -82,7 +82,7 @@ checkShuffle g xs = (var / fromIntegral avg) < (0.05 :: Double)
   where
     n = 10000
     gens = take n $ iterate (snd . next) g
-    xxs = map (flip shuffle2 xs) gens
+    xxs = map (flip shuffle xs) gens
     sums = map sum $ L.transpose xxs
     avg = sum sums `quot` length sums
     diffs = map (subtract avg) sums
