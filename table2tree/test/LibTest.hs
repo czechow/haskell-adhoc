@@ -41,6 +41,25 @@ test_shuffle =
         sumsRo2 = sum $ map (^(2 :: Int)) diffs
         var = sqrt $ fromIntegral $ sumsRo2 `quot` length sums
 
+-- now - test forest???
+
+test_queryDeps :: [TestTree]
+test_queryDeps =
+  [ testCase "query empty table" $
+    [] @=? queryDeps (buildDeps []) "Anything"
+  , testCase "query nonexistent element" $
+    [] @=? queryDeps m "Non-Existent"
+  , testCase "query one element" $
+    [("RA", "")] @=? queryDeps m "RA"
+  , testCase "query multiple elements" $
+    [("R", "RA"), ("RA", "")] @=? queryDeps m "R"
+  , testCase "query table with cycles" $
+    [("R", "RA"), ("RA", "R")] @=? queryDeps m' "R"
+  ]
+  where
+    m = buildDeps [("R", "RA"), ("RA", ""), ("O", "OA")]
+    m' = buildDeps [("R", "RA"), ("RA", "R"), ("O", "")]
+
 
 tests :: TestTree
 tests = $(testGroupGenerator)
