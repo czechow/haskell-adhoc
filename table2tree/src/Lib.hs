@@ -6,28 +6,32 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Control.Monad.State
+import Data.List
 
 type Level = Int
 type Name = String
+type LeafCount = Int
 
 type Ent = String
 type BenchByEnt = String
 
 -- Take 1:
-treeBuilder :: (Name, Level, StdGen) -> (String, [(Name, Level, StdGen)])
-treeBuilder (name, level, gen)
+treeBuilder :: (Name, Level, LeafCount, StdGen)
+            -> (String, [(Name, Level, LeafCount, StdGen)])
+treeBuilder (name, level, lc, gen)
   | level <= 1 = (name, [])
-  | otherwise = (name, zip3 (map ((name++) . (:[])) ['A'..])
+  | otherwise = (name, zip4 (map ((name++) . (:[])) ['A'..])
                        (repeat (pred level))
+                       (repeat lc)
                        (take len $ genFld gen'))
   where
-    (len, gen') = randomR(0, 3) gen
+    (len, gen') = randomR(0, lc) gen
     genFld = iterate (snd . next)
 
 -- FIXME: Take 2 treeBuilderM should be with State monad
 
 myTree :: T.Tree String
-myTree = T.unfoldTree treeBuilder ("R", 4, mkStdGen 2)
+myTree = T.unfoldTree treeBuilder ("R", 4, 3, mkStdGen 2)
 
 walk :: (Monoid a) => T.Tree a -> [(a, a)]
 walk t@(T.Node nme _) = (nme, mempty) : walk' t []
@@ -39,6 +43,9 @@ walk t@(T.Node nme _) = (nme, mempty) : walk' t []
       map (\(T.Node n _) -> (name, n)) forest ++
       (concatMap (flip walk' acc) forest)
 
+buildTable :: Name -> Level -> LeafCount -> StdGen -> [(Ent, BenchByEnt)]
+buildTable rootName levels maxLeafCount g =
+  walk $ T.unfoldTree treeBuilder (rootName, levels, maxLeafCount, g)
 
 shuffle_slow :: StdGen -> [a] -> [a]
 shuffle_slow _ [] = []

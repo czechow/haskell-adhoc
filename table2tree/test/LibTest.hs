@@ -4,11 +4,13 @@ module LibTest where
 
 import System.Random
 import Data.List
+import qualified Data.Set as S
+import Data.Tuple.Curry
 
 import Test.Tasty
 import Test.Tasty.TH
 import Test.Tasty.HUnit
-import Test.Tasty.QuickCheck as QC
+import qualified Test.Tasty.QuickCheck as QC
 
 import Lib
 
@@ -60,6 +62,24 @@ test_queryDeps =
     m = buildDeps [("R", "RA"), ("RA", ""), ("O", "OA")]
     m' = buildDeps [("R", "RA"), ("RA", "R"), ("O", "")]
 
+-- FIXME: add a test with simple (?) walking of the list
+
+test_forestSearch :: [TestTree]
+test_forestSearch =
+  [ QC.testProperty "searching shuffled tables should work the same" $
+    \g1 g2 g3 g4 ->
+      let count = fst $ randomR (1 :: Int, 10) (mkStdGen g1)
+          rootNames = map (("T" ++) . show) [1 :: Int ..]
+          levels = randomRs (1:: Int, 5) (mkStdGen g2)
+          gens = iterate (snd . next) (mkStdGen g3)
+          table = concat $ take count $
+                  map (uncurryN buildTable)
+                  (zip4 rootNames levels (repeat 5) gens)
+          shuffledTable = shuffle (mkStdGen g4) table
+          searchedKey = fst . head $ shuffledTable
+      in S.fromList (queryDeps (buildDeps table) searchedKey)
+         == S.fromList (queryDeps (buildDeps shuffledTable) searchedKey)
+  ]
 
 tests :: TestTree
 tests = $(testGroupGenerator)
