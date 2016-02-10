@@ -4,7 +4,6 @@ module LibTest where
 
 import System.Random
 import Data.List
-import qualified Data.Set as S
 import Data.Tuple.Curry
 
 import Test.Tasty
@@ -64,7 +63,7 @@ test_queryDeps =
 
 test_forestSearch :: [TestTree]
 test_forestSearch =
-  [ QC.testProperty "searching shuffled tables should work the same" $
+  [ QC.testProperty "querying shuffled and ordered table" $
     \g1 g2 g3 g4 ->
       let count = fst $ randomR (1 :: Int, 10) (mkStdGen g1)
           rootNames = map (("T" ++) . show) [1 :: Int ..]
