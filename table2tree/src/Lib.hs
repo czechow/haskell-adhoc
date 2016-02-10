@@ -93,13 +93,13 @@ buildDeps = foldl addToMap M.empty
 deps = buildDeps myTable
 
 
-queryDeps :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
-queryDeps = queryDeps' S.empty
+queryDeps :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt, Level)]
+queryDeps = queryDeps' 0 S.empty
   where
-    queryDeps' s m arg = case (S.member arg s, M.lookup arg m) of
+    queryDeps' lvl s m arg = case (S.member arg s, M.lookup arg m) of
       (False, Just children) ->
-        map ((,) arg) children ++
-        concatMap (queryDeps' (S.insert arg s) m) children
+        map (\c -> (arg, c, lvl)) children ++
+        concatMap (queryDeps' (succ lvl) (S.insert arg s) m) children
       (_, _) -> [] -- This takes care of circular dependencies too
 
 

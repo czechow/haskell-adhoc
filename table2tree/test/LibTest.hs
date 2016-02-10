@@ -52,17 +52,15 @@ test_queryDeps =
   , testCase "query nonexistent element" $
     [] @=? queryDeps m "Non-Existent"
   , testCase "query one element" $
-    [("RA", "")] @=? queryDeps m "RA"
+    [("RA", "", 0)] @=? queryDeps m "RA"
   , testCase "query multiple elements" $
-    [("R", "RA"), ("RA", "")] @=? queryDeps m "R"
+    [("R", "RA", 0), ("RA", "", 1)] @=? queryDeps m "R"
   , testCase "query table with cycles" $
-    [("R", "RA"), ("RA", "R")] @=? queryDeps m' "R"
+    [("R", "RA", 0), ("RA", "R", 1)] @=? queryDeps m' "R"
   ]
   where
     m = buildDeps [("R", "RA"), ("RA", ""), ("O", "OA")]
     m' = buildDeps [("R", "RA"), ("RA", "R"), ("O", "")]
-
--- FIXME: add a test with simple (?) walking of the list
 
 test_forestSearch :: [TestTree]
 test_forestSearch =
@@ -74,11 +72,13 @@ test_forestSearch =
           gens = iterate (snd . next) (mkStdGen g3)
           table = concat $ take count $
                   map (uncurryN buildTable)
-                  (zip4 rootNames levels (repeat 5) gens)
+                      (zip4 rootNames levels (repeat 5) gens)
           shuffledTable = shuffle (mkStdGen g4) table
           searchedKey = fst . head $ shuffledTable
-      in S.fromList (queryDeps (buildDeps table) searchedKey)
-         == S.fromList (queryDeps (buildDeps shuffledTable) searchedKey)
+          sort' = sortBy (\(n1, b1, l1) (n2, b2, l2) ->
+                           (l1, n1, b1) `compare` (l2, n2, b2))
+      in sort' (queryDeps (buildDeps table) searchedKey)
+         == sort' (queryDeps (buildDeps shuffledTable) searchedKey)
   ]
 
 tests :: TestTree
