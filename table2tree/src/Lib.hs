@@ -21,14 +21,28 @@ treeBuilder :: (Name, Level, LeafCount, StdGen)
 treeBuilder (name, level, lc, gen)
   | level <= 1 = (name, [])
   | otherwise = (name, zip4 (map ((name++) . (:[])) ['A'..])
-                       (repeat (pred level))
-                       (repeat lc)
-                       (take len $ genFld gen'))
+                            (repeat (pred level))
+                            (repeat lc)
+                            (take len $ genFld gen'))
   where
     (len, gen') = randomR(0, lc) gen
     genFld = iterate (snd . next)
 
 -- FIXME: Take 2 treeBuilderM should be with State monad
+
+-- unfoldTreeM :: Monad m => (b -> m (a, [b])) -> b -> m (Tree a)
+treeBuilderM :: (Name, Level, LeafCount)
+             -> State StdGen (String, [(Name, Level, LeafCount)])
+treeBuilderM (name, level, lc)
+  | level <= 1 = return $ (name, [])
+  | otherwise = do
+      gen <- get
+      let (len, gen') = randomR(0, lc) gen
+      _ <- put gen'
+      return $ (name, zip3 (map ((name++) . (:[])) ['A'..])
+                      (repeat (pred level))
+                      (take len $ repeat lc))
+
 
 myTree :: T.Tree String
 myTree = T.unfoldTree treeBuilder ("R", 4, 3, mkStdGen 2)

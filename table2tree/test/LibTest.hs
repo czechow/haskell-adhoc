@@ -5,6 +5,8 @@ module LibTest where
 import System.Random
 import Data.List
 import Data.Tuple.Curry
+import Data.Tree
+import Control.Monad.State
 
 import Test.Tasty
 import Test.Tasty.TH
@@ -13,16 +15,21 @@ import qualified Test.Tasty.QuickCheck as QC
 
 import Lib
 
+test_treeBuilders :: [TestTree]
+test_treeBuilders =
+  [ QC.testProperty "monadic and non-monadic builder work the same" $
+    \g -> unfoldTree treeBuilder ("R", 4, 3, mkStdGen g)
+          QC.===
+          evalState (unfoldTreeM_BF treeBuilderM ("R", 4, 3)) (mkStdGen g)
+  ]
+
 test_shuffleStrategies :: [TestTree]
 test_shuffleStrategies =
   [ QC.testProperty "shuffle_slow and shuffle work the same" $
     \list g -> shuffle_slow (mkStdGen g) (list :: [Int])
-               == Lib.shuffle (mkStdGen g) list
+               QC.=== Lib.shuffle (mkStdGen g) list
   ]
 
-
--- FIXME: Any mathematical base for checking?
--- convert this to more generic type
 test_shuffle :: [TestTree]
 test_shuffle =
   [ QC.testProperty "distribution after shuffling" $
@@ -41,8 +48,6 @@ test_shuffle =
         diffs = map (subtract avg) sums
         sumsRo2 = sum $ map (^(2 :: Int)) diffs
         var = sqrt $ fromIntegral $ sumsRo2 `quot` length sums
-
--- now - test forest???
 
 test_queryDeps :: [TestTree]
 test_queryDeps =
@@ -77,7 +82,8 @@ test_forestSearch =
           sort' = sortBy (\(n1, b1, l1) (n2, b2, l2) ->
                            (l1, n1, b1) `compare` (l2, n2, b2))
       in sort' (queryDeps (buildDeps table) searchedKey)
-         == sort' (queryDeps (buildDeps shuffledTable) searchedKey)
+         QC.===
+         sort' (queryDeps (buildDeps shuffledTable) searchedKey)
   ]
 
 tests :: TestTree
