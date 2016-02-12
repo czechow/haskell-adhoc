@@ -138,4 +138,9 @@ queryDeps3' m arg = do
         liftM concat (mapM (queryDeps3' m) children)
     (_, _) -> return [] -- This takes care of circular dependencies too
 
--- next step: add testing ???
+
+-- Something different
+-- Splitting command line parameters with their switches
+parseCmdLine :: [String] -> [[String]]
+parseCmdLine = groupBy f
+  where f _ y = take 2 y /= "--"
