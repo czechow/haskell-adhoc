@@ -15,37 +15,22 @@ type LeafCount = Int
 type Ent = String
 type BenchByEnt = String
 
--- Take 1:
-treeBuilder :: (Name, Level, LeafCount, StdGen)
-            -> (String, [(Name, Level, LeafCount, StdGen)])
-treeBuilder (name, level, lc, gen)
-  | level <= 1 = (name, [])
-  | otherwise = (name, zip4 (map ((name++) . (:[])) ['A'..])
-                            (repeat (pred level))
-                            (repeat lc)
-                            (take len $ genFld gen'))
-  where
-    (len, gen') = randomR(0, lc) gen
-    genFld = iterate (snd . next)
 
--- FIXME: Take 2 treeBuilderM should be with State monad
-
--- unfoldTreeM :: Monad m => (b -> m (a, [b])) -> b -> m (Tree a)
-treeBuilderM :: (Name, Level, LeafCount)
-             -> State StdGen (String, [(Name, Level, LeafCount)])
-treeBuilderM (name, level, lc)
+treeBuilderM :: (Name, Level)
+             -> State (LeafCount,  StdGen) (String, [(Name, Level)])
+treeBuilderM (name, level)
   | level <= 1 = return $ (name, [])
   | otherwise = do
-      gen <- get
+      (lc, gen) <- get
       let (len, gen') = randomR(0, lc) gen
-      _ <- put gen'
-      return $ (name, zip3 (map ((name++) . (:[])) ['A'..])
-                      (repeat (pred level))
-                      (take len $ repeat lc))
+      _ <- put (lc, gen')
+      return $ (name, take len $
+                      zip (map ((name++) . (:[])) ['A'..])
+                      (repeat (pred level)))
 
 
 myTree :: T.Tree String
-myTree = T.unfoldTree treeBuilder ("R", 4, 3, mkStdGen 2)
+myTree = evalState (T.unfoldTreeM treeBuilderM ("R", 4)) (3, mkStdGen 1)
 
 walk :: (Monoid a) => T.Tree a -> [(a, a)]
 walk t@(T.Node nme _) = (nme, mempty) : walk' t []
@@ -59,7 +44,8 @@ walk t@(T.Node nme _) = (nme, mempty) : walk' t []
 
 buildTable :: Name -> Level -> LeafCount -> StdGen -> [(Ent, BenchByEnt)]
 buildTable rootName levels maxLeafCount g =
-  walk $ T.unfoldTree treeBuilder (rootName, levels, maxLeafCount, g)
+  walk $
+  (evalState (T.unfoldTreeM treeBuilderM (rootName, levels)) (maxLeafCount, g))
 
 shuffle_slow :: StdGen -> [a] -> [a]
 shuffle_slow _ [] = []
@@ -81,6 +67,8 @@ shuffle g = (shuffle' g) . toMap
         elemDrawn = M.elemAt index m
         m' = M.deleteAt index m
 
+-- FIXME: Try shuffling with mutable state
+
 
 myTable :: [(Ent, BenchByEnt)]
 myTable = shuffle (mkStdGen 1) $ walk myTree
@@ -90,7 +78,6 @@ myMap = foldl (\m (e, parent) -> M.alter (f e) parent m) M.empty myTable
   where
     f e' (Just es) = Just $ e' : es
     f e' Nothing =  Just $ [e']
-
 
 
 

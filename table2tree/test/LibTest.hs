@@ -15,14 +15,6 @@ import qualified Test.Tasty.QuickCheck as QC
 
 import Lib
 
-test_treeBuilders :: [TestTree]
-test_treeBuilders =
-  [ QC.testProperty "monadic and non-monadic builder work the same" $
-    \g -> unfoldTree treeBuilder ("R", 4, 3, mkStdGen g)
-          QC.===
-          evalState (unfoldTreeM_BF treeBuilderM ("R", 4, 3)) (mkStdGen g)
-  ]
-
 test_shuffleStrategies :: [TestTree]
 test_shuffleStrategies =
   [ QC.testProperty "shuffle_slow and shuffle work the same" $
