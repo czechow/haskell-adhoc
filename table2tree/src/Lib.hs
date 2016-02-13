@@ -80,9 +80,7 @@ myMap = foldl (\m (e, parent) -> M.alter (f e) parent m) M.empty myTable
     f e' Nothing =  Just $ [e']
 
 
-
--- This is the core problem:
--- With [(Parent, Child)] in our hands we need to locate
+-- With [(Ent, BenchByEnt)] in our hands we build a map...
 buildDeps :: [(Ent, BenchByEnt)] -> M.Map Ent [BenchByEnt]
 buildDeps = foldl addToMap M.empty
   where
@@ -93,7 +91,7 @@ buildDeps = foldl addToMap M.empty
 
 deps = buildDeps myTable
 
-
+-- ...to be able to get ent and all its deps efficiently (n*log(n))
 queryDeps :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt, Level)]
 queryDeps = queryDeps' 0 S.empty
   where
@@ -104,7 +102,6 @@ queryDeps = queryDeps' 0 S.empty
       (_, _) -> [] -- This takes care of circular dependencies too
 
 
--- now state monad, please
 -- This looks more complex than param passing (unless I am missing something)
 queryDeps3 :: M.Map Ent [BenchByEnt] -> Ent -> [(Ent, BenchByEnt)]
 queryDeps3 m arg = evalState (queryDeps3' m arg) S.empty
@@ -117,17 +114,17 @@ queryDeps3' m arg = do
   case (S.member arg s, M.lookup arg m) of
     (False, Just children) -> do
       put $ S.insert arg s
-      -- This one is too complex to read:
-      -- liftM (((map ((,) arg) children)++) . concat)
-      --  (mapM (queryDeps3' m) children)
       (++) <$>
         return (map ((,) arg) children) <*>
         liftM concat (mapM (queryDeps3' m) children)
     (_, _) -> return [] -- This takes care of circular dependencies too
 
 
--- Something different
+-------------------------------------------------------------------------------
+-- Something unrelated
 -- Splitting command line parameters with their switches
+-------------------------------------------------------------------------------
+
 parseCmdLine :: [String] -> [[String]]
 parseCmdLine = groupBy f
   where f _ y = take 2 y /= "--"
