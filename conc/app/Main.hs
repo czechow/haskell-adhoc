@@ -6,6 +6,8 @@ import System.IO
 
 import qualified Data.Map as M
 
+import Channel
+
 main :: IO ()
 main = main5
 
