@@ -29,7 +29,7 @@ test_transfer =
     testTransferOneThread
   ]
 
-testTransferOneThread:: [Int] -> Property
+testTransferOneThread :: [Int] -> Property
 testTransferOneThread xs = monadicIO $ do
   ch <- run $ newCh
   _ <- run $ forkIO $ sequence_ [writeCh ch x | x <- xs]
