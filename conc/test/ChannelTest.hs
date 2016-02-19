@@ -7,7 +7,11 @@ import Test.Tasty.QuickCheck
 import Test.QuickCheck.Monadic
 
 import System.Process
+import System.Random
 import Control.Concurrent
+
+import qualified Data.Map as M
+
 import Channel
 
 -- For more examples on monadic testing see
@@ -26,14 +30,35 @@ test_transfer :: [TestTree]
 test_transfer =
   [ localOption (mkTimeout $ ms 1000) $
     testProperty "all data get through channel and in the same order" $
-    transferOneThread
+    oneWrOneRd
   , localOption (mkTimeout $ ms 1000) $
     testProperty "reading empty channel should block" $
     once $ blockingRead
+  , localOption (mkTimeout $ ms 1000) $
+    testProperty "multiple writers should get data through" $
+    mulWrOneRd
   ]
 
-transferOneThread :: [Int] -> Property
-transferOneThread xs = monadicIO $ do
+mulWrOneRd :: [[Int]] -> Property
+mulWrOneRd xxs = monadicIO $ do
+  pre $ length xxs > 1
+  pre $ all ((>0) . length) xxs
+  let txxs = zip [(1 :: Int)..] xxs
+  ch <- run $ newCh
+  run $ sequence_ $ [forkIO $ writeList ch thId xs | (thId, xs) <- txxs]
+  ys <- run $ sequence [readCh ch | _ <- foldl (++) [] xxs]
+  let zs =
+        foldl (\m (thId, x) -> M.insertWith (flip (++)) thId [x] m) M.empty ys
+  assert $ zs == M.fromList txxs
+  where
+    writeList _ _ [] = return ()
+    writeList ch' thId' (x':xs') = do
+      writeCh ch' (thId', x')
+      writeList ch' thId' xs'
+
+
+oneWrOneRd :: [Int] -> Property
+oneWrOneRd xs = monadicIO $ do
   ch <- run $ newCh
   _ <- run $ forkIO $ sequence_ [writeCh ch x | x <- xs]
   zs <- run $ sequence [readCh ch | _ <- xs]
@@ -54,6 +79,7 @@ blockingRead = monadicIO $ do
   run $ threadDelay 20
   v' <- run $ readMVar readFinished
   assert v'
+
 
 
 

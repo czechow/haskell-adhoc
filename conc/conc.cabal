@@ -39,6 +39,8 @@ test-suite conc-test
                      , tasty-th
                      , QuickCheck
                      , process
+                     , random
+                     , containers
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
