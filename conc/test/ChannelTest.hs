@@ -26,15 +26,36 @@ test_transfer :: [TestTree]
 test_transfer =
   [ localOption (mkTimeout $ ms 1000) $
     testProperty "all data get through channel and in the same order" $
-    testTransferOneThread
+    transferOneThread
+  , localOption (mkTimeout $ ms 1000) $
+    testProperty "reading empty channel should block" $
+    once $ blockingRead
   ]
 
-testTransferOneThread :: [Int] -> Property
-testTransferOneThread xs = monadicIO $ do
+transferOneThread :: [Int] -> Property
+transferOneThread xs = monadicIO $ do
   ch <- run $ newCh
   _ <- run $ forkIO $ sequence_ [writeCh ch x | x <- xs]
   zs <- run $ sequence [readCh ch | _ <- xs]
   assert (zs == xs)
+
+blockingRead :: Property
+blockingRead = monadicIO $ do
+  ch <- run $ newCh
+  readFinished <- run $ newMVar False
+  _ <- run $ forkIO $ do
+    _ <- readCh ch
+    _ <- takeMVar readFinished
+    putMVar readFinished True
+  run $ threadDelay 20
+  v <- run $ readMVar readFinished
+  assert $ not v
+  run $ writeCh ch "xxx"
+  run $ threadDelay 20
+  v' <- run $ readMVar readFinished
+  assert v'
+
+
 
 
 tests :: TestTree
