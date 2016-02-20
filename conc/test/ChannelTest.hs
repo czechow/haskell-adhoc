@@ -6,22 +6,16 @@ import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.QuickCheck.Monadic
 
-import System.Process
-import System.Random
 import Control.Concurrent
 
 import qualified Data.Map as M
+import qualified Data.DList as DL
 
 import Channel
 
 -- For more examples on monadic testing see
 -- https://hackage.haskell.org/package/QuickCheck-2.8.2/docs/Test-QuickCheck-Monadic.html#v:run
 
-class EOFy a where
-  eof :: a
-
-instance EOFy Int where
-  eof = -1
 
 ms:: Integer -> Integer
 ms = (*1000)
@@ -39,17 +33,19 @@ test_transfer =
     mulWrOneRd
   ]
 
+-- Thread limit here makes the test run faster
 mulWrOneRd :: [[Int]] -> Property
 mulWrOneRd xxs = monadicIO $ do
-  pre $ length xxs > 1
+  pre $ length xxs > 1 && length xxs <= 8 -- thread limit
   pre $ all ((>0) . length) xxs
   let txxs = zip [(1 :: Int)..] xxs
   ch <- run $ newCh
   run $ sequence_ $ [forkIO $ writeList ch thId xs | (thId, xs) <- txxs]
   ys <- run $ sequence [readCh ch | _ <- foldl (++) [] xxs]
-  let zs =
-        foldl (\m (thId, x) -> M.insertWith (flip (++)) thId [x] m) M.empty ys
-  assert $ zs == M.fromList txxs
+  let zs = foldl (\m (thId, x) ->
+                   M.insertWith (flip DL.append) thId (DL.singleton x) m)
+           M.empty ys
+  assert $ M.map DL.toList zs == M.fromList txxs
   where
     writeList _ _ [] = return ()
     writeList ch' thId' (x':xs') = do
@@ -79,10 +75,6 @@ blockingRead = monadicIO $ do
   run $ threadDelay 20
   v' <- run $ readMVar readFinished
   assert v'
-
-
-
-
 
 tests :: TestTree
 tests = testGroup "ChannelTests" (test_transfer)
