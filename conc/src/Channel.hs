@@ -29,6 +29,13 @@ readCh (Ch mvRead _) = do
   putMVar mvRead nextStream
   return x
 
+dupCh :: Ch a -> IO (Ch a)
+dupCh (Ch _ mvWrite) = do
+  wrPtr <- readMVar mvWrite
+  mvRead' <- newMVar wrPtr
+  return $ Ch mvRead' mvWrite
+
+
 -- we want to implement channels that allow simultaneous read and write
 
 data Channel a = Channel (MVar (MVar (Node a))) (MVar (MVar (Node a)))
