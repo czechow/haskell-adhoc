@@ -33,6 +33,42 @@ test_transfer =
     mulWrOneRd
   ]
 
+test_dup :: [TestTree]
+test_dup =
+  [ localOption (mkTimeout $ ms 1000) $
+    testProperty "dupped channel must see the same data as original" $
+    dupOneWrMulRd
+  , localOption (mkTimeout $ ms 1000) $
+    testProperty
+    "orig and dupped channel writes should be available in both chs" $
+    dupMulWrMulRd
+  ]
+
+dupOneWrMulRd :: [Int] -> Property
+dupOneWrMulRd xs = monadicIO $ do
+  chOrig <- run $ newCh
+  chDup <- run $ dupCh chOrig
+  _ <- run $ forkIO $ sequence_ [writeCh chOrig x | x <- xs]
+  ys <- run $ sequence [readCh chOrig | _ <- xs]
+  zs <- run $ sequence [readCh chDup | _ <- xs]
+  assert $ ys == zs
+
+dupMulWrMulRd :: [Int] -> [Int] -> Property
+dupMulWrMulRd xs ys = monadicIO $ do
+  chOrig <- run $ newCh
+  chDup <- run $ dupCh chOrig
+  _ <- run $ forkIO $ sequence_ [writeCh chOrig (1 :: Int, x) | x <- xs]
+  _ <- run $ forkIO $ sequence_ [writeCh chDup (2 :: Int, y) | y <- ys]
+
+  zs <- run $ sequence [readCh chOrig | _ <- xs ++ ys]
+  zs' <- run $ sequence [readCh chDup | _ <- xs ++ ys]
+
+  assert $ map snd (filter ((1==) . fst) zs) == xs
+  assert $ map snd (filter ((2==) . fst) zs) == ys
+
+  assert $ (map snd zs) == (map snd zs')
+
+
 -- Thread limit here makes the test run faster
 mulWrOneRd :: [[Int]] -> Property
 mulWrOneRd xxs = monadicIO $ do
@@ -77,4 +113,4 @@ blockingRead = monadicIO $ do
   assert v'
 
 tests :: TestTree
-tests = testGroup "ChannelTests" (test_transfer)
+tests = testGroup "ChannelTests" (test_transfer ++ test_dup)
