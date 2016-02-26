@@ -4,6 +4,7 @@ import Data.Graph
 import Data.List
 import Data.CSV
 import Data.Tuple
+import Data.Tuple.Extra
 import Data.Bifunctor
 import System.Exit
 
@@ -26,11 +27,20 @@ invMap m = M.fromList $ lst
   where
     lst = map swap $ M.toList m
 
-readSecRels :: IO (Either ParseError [SecRel])
-readSecRels = do
-  result <- parseFromFile csvFile "test.csv"
-  -- FIXME: change to a function without lambda (?)
-  return $ tail . (map (\row -> (head row, head $ drop 16 row))) <$> result
+readCsvFile :: FilePath -> IO (Either ParseError [[String]])
+readCsvFile fileName = parseFromFile csvFile fileName
+
+csvRecsToSecRels :: [[String]] -> Either ErrorMsg [SecRel]
+csvRecsToSecRels xxs = undefined
+
+readSecRels :: FilePath -> IO (Either ParseError [(Int, SecRel)])
+readSecRels fileName = do
+  result <- parseFromFile csvFile fileName
+  -- FIXME: this can fail if row is not complete...
+  return $ (map (Data.Tuple.Extra.second (head &&& (head . drop 16)))) . safeTail <$> zip [1..] result
+    where
+      safeTail [] = []
+      safeTail xs = tail xs
 
 checkSecRels :: [SecRel] -> Either ErrorMsg ([SecRel], [WarnMsg])
 checkSecRels xs = checkUniqueKeys (xs, []) >>=
@@ -68,11 +78,13 @@ buildGraph srInt = Just $ buildG bounds edges'
                      Nothing -> acc)
             [] srInt
 
+
+
 main :: IO ()
 main = do
   putStrLn "Up and running"
 
-  errorOrSecRels <- readSecRels
+  errorOrSecRels <- readSecRels "test.csv"
   case errorOrSecRels of
     Left e -> do
       putStrLn $ "CSV parse error: " ++ show e

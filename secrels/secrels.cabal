@@ -28,6 +28,7 @@ executable secrels
                      , parsec
                      , MissingH
                      , secrels
+                     , extra
   default-language:    Haskell2010
 
 test-suite secrels-test
