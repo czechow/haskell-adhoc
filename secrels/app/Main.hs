@@ -4,9 +4,10 @@ import Data.Graph
 import Data.List
 import Data.CSV
 import Data.Tuple
-import Data.Tuple.Extra
+import Data.Tuple.Extra ((&&&))
 import Data.Bifunctor
 import System.Exit
+import Data.Ord
 
 import Text.ParserCombinators.Parsec
 import qualified Data.Map as M
@@ -17,7 +18,7 @@ type BenchSecId = SecId
 type SecRel = (SecId, BenchSecId)
 type ErrorMsg = String
 type WarnMsg = String
-
+type RowNum = Int
 
 secIdToIntMap :: [SecId] -> M.Map SecId Int
 secIdToIntMap xs = M.fromList $ zip (sort xs) [1..]
@@ -33,24 +34,45 @@ readCsvFile fileName = parseFromFile csvFile fileName
 csvRecsToSecRels :: [[String]] -> Either ErrorMsg [SecRel]
 csvRecsToSecRels xxs = undefined
 
-readSecRels :: FilePath -> IO (Either ParseError [(Int, SecRel)])
-readSecRels fileName = do
-  result <- parseFromFile csvFile fileName
-  -- FIXME: this can fail if row is not complete...
-  return $ (map (Data.Tuple.Extra.second (head &&& (head . drop 16)))) . safeTail <$> zip [1..] result
+readSecRels :: FilePath -> HasHeader -> IO (Either ErrorMsg [(RowNum, SecRel)])
+readSecRels fileName hasHeader = do
+  csv <- parseFromFile csvFile fileName
+  return $ verifyStructure csv hasHeader
     where
+      verifyStructure (Left parseError) _ = Left $ show parseError
+      verifyStructure (Right rows) NoHeader =
+        sequence $ map verifyRow $ zip [1..] rows
+      verifyStructure (Right rows) SkipHeader =
+        sequence $ map verifyRow $ safeTail $ zip [1..] rows
+
+      verifyRow (rowNum, cells) =
+        case (safeHead &&& safeHead . drop 16) cells of
+          (Just secId, Just benchSecId) -> Right $ (rowNum, (secId, benchSecId))
+          (Nothing, _) ->
+            Left $ "Error in row " ++ show rowNum ++ ": no first column"
+          (_, Nothing) ->
+            Left $ "Error in row " ++ show rowNum ++ ": no 17-th column"
+
       safeTail [] = []
       safeTail xs = tail xs
 
-checkSecRels :: [SecRel] -> Either ErrorMsg ([SecRel], [WarnMsg])
+      safeHead [] = Nothing
+      safeHead (x: _) = Just x
+
+checkSecRels :: [(RowNum, SecRel)] -> Either ErrorMsg ([SecRel], [WarnMsg])
 checkSecRels xs = checkUniqueKeys (xs, []) >>=
-                  checkCompletness
+                  undefined --           checkCompletness
   where
     checkUniqueKeys (xs', ws)
-      | secIds == nub secIds = Right (xs', ws)
+      | groupedSecIds == nub secIds = Right (map snd xs', ws)
       | otherwise = Left $
                     "Non unique keys in relation: "
                     ++ show (nub (secIds \\ nub secIds))
+      where
+        -- FIXME: get rid of lambda here
+        groupedSecIds = groupBy (\x y -> snd x == snd y) $
+                        sortBy (comparing snd) $
+                        map (fst &&& fst . snd) xs'
     checkCompletness (xs', ws)
       | S.null setDiff = Right (xs', ws)
       | otherwise =
@@ -79,12 +101,13 @@ buildGraph srInt = Just $ buildG bounds edges'
             [] srInt
 
 
+data HasHeader = NoHeader | SkipHeader
 
 main :: IO ()
 main = do
   putStrLn "Up and running"
 
-  errorOrSecRels <- readSecRels "test.csv"
+  errorOrSecRels <- readSecRels "test.csv" SkipHeader
   case errorOrSecRels of
     Left e -> do
       putStrLn $ "CSV parse error: " ++ show e
