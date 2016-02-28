@@ -64,15 +64,14 @@ checkSecRels xs = checkUniqueKeys (xs, []) >>=
                   undefined --           checkCompletness
   where
     checkUniqueKeys (xs', ws)
-      | groupedSecIds == nub secIds = Right (map snd xs', ws)
-      | otherwise = Left $
-                    "Non unique keys in relation: "
-                    ++ show (nub (secIds \\ nub secIds))
+      | null nonUniqueSecIds = Right (map snd xs', ws)
+      | otherwise = Left $ foldl (\acc [rowNumAndSecId] ->
+                                   undefined) "" nonUniqueSecIds
       where
-        -- FIXME: get rid of lambda here
-        groupedSecIds = groupBy (\x y -> snd x == snd y) $
-                        sortBy (comparing snd) $
-                        map (fst &&& fst . snd) xs'
+        nonUniqueSecIds = map () $ filter ((>1) . length) groupedSecIds
+        groupedSecIds :: M.Map SecId [RowNum]
+        groupedSecIds = foldl () M.empty $
+                        map (fst . snd &&& fst) xs'
     checkCompletness (xs', ws)
       | S.null setDiff = Right (xs', ws)
       | otherwise =
