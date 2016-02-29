@@ -25,7 +25,7 @@ secIdToIntMap xs = M.fromList $ zip (sort xs) [1..]
 
 invMap :: Ord b => M.Map a b -> M.Map b a
 invMap m = M.fromList $ lst
-  where
+  where 
     lst = map swap $ M.toList m
 
 readCsvFile :: FilePath -> IO (Either ParseError [[String]])
@@ -59,34 +59,46 @@ readSecRels fileName hasHeader = do
       safeHead [] = Nothing
       safeHead (x: _) = Just x
 
-checkSecRels :: [(RowNum, SecRel)] -> Either ErrorMsg ([SecRel], [WarnMsg])
-checkSecRels xs = checkUniqueKeys (xs, []) >>=
-                  undefined --           checkCompletness
-  where
-    checkUniqueKeys (xs', ws)
-      | null nonUniqueSecIds = Right (map snd xs', ws)
-      | otherwise = Left $ foldl (\acc [rowNumAndSecId] ->
-                                   undefined) "" nonUniqueSecIds
-      where
-        nonUniqueSecIds = map () $ filter ((>1) . length) groupedSecIds
-        groupedSecIds :: M.Map SecId [RowNum]
-        groupedSecIds = foldl () M.empty $
-                        map (fst . snd &&& fst) xs'
-    checkCompletness (xs', ws)
-      | S.null setDiff = Right (xs', ws)
-      | otherwise =
-        Right (foldl (\(xs'', ws'') sr'@(s, bs) ->
-                       if S.notMember bs setDiff
-                       then (xs'' ++ [sr'], ws'')
-                       else (xs'' ++ [(s, "")],
-                             ws'' ++ ["Discarded incorrect ref [" ++ bs ++ "] in [" ++ s ++ "]"]))
-               ([], ws) xs')
-      where
-        setDiff =
-          (S.fromList $ filter (/="") benchSecIds) S.\\ S.fromList secIds
-    secIds = map fst xs
-    benchSecIds = map snd xs
 
+-- FIXME: State monad in terms of WarnMsg
+checkSecRels :: [(RowNum, SecRel)] -> Either [ErrorMsg] ([SecRel], [WarnMsg])
+checkSecRels xs = do
+  case checkUniqueSecIds xs of
+    Left e -> Left e
+    -- FIXME: finished here
+    
+
+checkUniqueSecIds :: [(RowNum, SecRel)]
+                  -> Either [ErrorMsg] ([SecRel], [WarnMsg])
+checkUniqueSecIds xs'
+  | null nonUniqueSecIds = Right ((map snd xs'), [])
+  | otherwise =
+      Left $ map (\(secId, rowNums) ->
+                   "Duplicate secIds [" ++ secId ++ "] found in lines " ++
+                   concat (intersperse ", " (map show rowNums))
+                 ) $ sortBy (comparing (head . snd)) $
+                     M.toList nonUniqueSecIds
+  where
+    nonUniqueSecIds = M.filter ((>1) . length) groupedSecIds
+    groupedSecIds :: M.Map SecId [RowNum]
+    groupedSecIds = foldl (\m (secId, rowNum) ->
+                            M.insertWith (flip (++)) secId [rowNum] m)
+                    M.empty $
+                    map (fst . snd &&& fst) xs'
+
+checkSecRelsCompletness :: ([(RowNum, SecRel)]) -> ([SecRel], [WarnMsg])
+checkSecRelsCompletness xs =
+  foldl (\acc (rowNum, sr@(_, benchSecId)) ->
+          if S.notMember benchSecId secIdsSet
+          then first (++ [sr]) acc
+          else bimap (++ [sr])
+                     (++ ["Discarded incorrect ref [" ++ benchSecId
+                          ++ "] in row " ++ show rowNum])
+                     acc)
+        ([], [])
+        xs
+  where
+    secIdsSet = S.fromList $ map (fst . snd) xs
 
 buildGraph :: [(Int, Maybe Int)] -> Maybe Graph
 buildGraph [] = Nothing
@@ -114,7 +126,7 @@ main = do
     Right secRels -> do
       case checkSecRels secRels of
         Left e' -> do
-          putStrLn $ "Invalid security structure: " ++ e'
+          putStrLn $ "Invalid security structure: "
           exitWith $ ExitFailure 2
         Right (sr, warns) -> do
           mapM_ putStrLn $ ["Security structure warnings:"] ++ warns
