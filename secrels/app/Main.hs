@@ -20,6 +20,24 @@ type ErrorMsg = String
 type WarnMsg = String
 type RowNum = Int
 
+-- FIXME:? or Just record type?
+
+{-
+1. Composition
+readCsvFile - reads file - deals with IO, delivers [[String]]
+            - on error - returns IO or ParseError from Parsec? (FIXME)
+
+
+toSecRels - tries to convert [[String]] to (SecRels)
+          - on error - returns Left
+
+checkSecRels - checks sematic correctness of SecRels
+
+
+-}
+
+
+
 secIdToIntMap :: [SecId] -> M.Map SecId Int
 secIdToIntMap xs = M.fromList $ zip (sort xs) [1..]
 
@@ -28,11 +46,13 @@ invMap m = M.fromList $ lst
   where 
     lst = map swap $ M.toList m
 
+
 readCsvFile :: FilePath -> IO (Either ParseError [[String]])
 readCsvFile fileName = parseFromFile csvFile fileName
 
-csvRecsToSecRels :: [[String]] -> Either ErrorMsg [SecRel]
-csvRecsToSecRels xxs = undefined
+
+toSecRels :: [[String]] -> Either ErrorMsg [SecRel]
+toSecRels xxs = undefined
 
 readSecRels :: FilePath -> HasHeader -> IO (Either ErrorMsg [(RowNum, SecRel)])
 readSecRels fileName hasHeader = do
