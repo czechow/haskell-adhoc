@@ -43,7 +43,7 @@ secIdToIntMap xs = M.fromList $ zip (sort xs) [1..]
 
 invMap :: Ord b => M.Map a b -> M.Map b a
 invMap m = M.fromList $ lst
-  where 
+  where
     lst = map swap $ M.toList m
 
 
@@ -86,7 +86,7 @@ checkSecRels xs = do
   case checkUniqueSecIds xs of
     Left e -> Left e
     -- FIXME: finished here
-    
+
 
 checkUniqueSecIds :: [(RowNum, SecRel)]
                   -> Either [ErrorMsg] ([SecRel], [WarnMsg])
