@@ -23,12 +23,14 @@ executable secrels
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  --ghc-options:         -optl-static -optl-pthread
   build-depends:       base
                      , containers
                      , parsec
                      , MissingH
                      , secrels
                      , extra
+                     , either
   default-language:    Haskell2010
 
 test-suite secrels-test
@@ -40,6 +42,6 @@ test-suite secrels-test
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
-source-repository head
-  type:     git
-  location: https://github.com/githubuser/secrels
+--source-repository head
+--  type:     git
+--  location: https://github.com/githubuser/secrels

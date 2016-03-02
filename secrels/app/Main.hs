@@ -8,6 +8,8 @@ import Data.Tuple.Extra ((&&&))
 import Data.Bifunctor
 import System.Exit
 import Data.Ord
+import Data.Either.Combinators (mapBoth, mapRight)
+
 
 import Text.ParserCombinators.Parsec
 import qualified Data.Map as M
@@ -20,19 +22,52 @@ type ErrorMsg = String
 type WarnMsg = String
 type RowNum = Int
 
--- FIXME:? or Just record type?
+-- how about throwing in some typeclasses
+-- so that position in file/input config is abstracted away?
 
 {-
+
 1. Composition
 readCsvFile - reads file - deals with IO, delivers [[String]]
-            - on error - returns IO or ParseError from Parsec? (FIXME)
+            - on error - ParseError from Parsec (in IO) (composable ???)
+
+-- This may be monadic (within a state monad)
+-- and return mapping SecRel -> RowNum
+-- First, let's try without a monad returning proper results
+-- yes, we will be less composable (but explicit about the params)
+
+toSecRels - converts [(RowNum, [String])] to SecRels
+          - on ok - Right [(SecRel, RowNum)]
+          - on error - Left [ErrorMsg]
+
+-- again a state monad here???
+
+checkSecRels - checks semantic correctness of SecRels [(SecRel, RowNum)]
+             - on ok - Right ([SecRel], [WarnMsg])
+             - on error - Left [ErrorMsg]
 
 
-toSecRels - tries to convert [[String]] to (SecRels)
-          - on error - returns Left
+2. Flow control
+-- This should be a composition of fns from 1.
+readSecRels - reads csv file
+            - on ok - IO $ Right ([SecRel], [WarnMsg])
+            - on error - IO $ Left [ErrorMsg]
 
-checkSecRels - checks sematic correctness of SecRels
+-- Build from csv -only if needed
+-- We should declare the structure directly
+fromString :: [String] -> ([SecRel], [WarnMsg])
 
+
+3. Testing
+--
+[ "A", "B"
+  "C", "D"
+]
+
+or
+[("A", Just "B")
+,("C", Nothing)
+]
 
 -}
 
@@ -47,51 +82,72 @@ invMap m = M.fromList $ lst
     lst = map swap $ M.toList m
 
 
-readCsvFile :: FilePath -> IO (Either ParseError [[String]])
-readCsvFile fileName = parseFromFile csvFile fileName
+{-
+1. Composition
+readCsvFile - reads file - deals with IO, delivers [(RowNum, [String])]
+            - on error - ParseError from Parsec (in IO) (composable ???)
+-}
+
+readCsvFile :: FilePath -> HasHeader
+            -> IO (Either [ErrorMsg] [(RowNum, [String])])
+readCsvFile fileName NoHeader =
+  mapBoth ((:[]) . show) (zip [1..]) <$> parseFromFile csvFile fileName
+readCsvFile fileName SkipHeader =
+  mapRight safeTail <$> readCsvFile fileName NoHeader
+  where
+    safeTail [] = []
+    safeTail xs = tail xs
 
 
-toSecRels :: [[String]] -> Either ErrorMsg [SecRel]
-toSecRels xxs = undefined
+{-
+-- This may be monadic (within a state monad)
+-- and return mapping SecRel -> RowNum
+-- First, let's try without a monad returning proper results
+-- yes, we will be less composable (but explicit about the params)
 
-readSecRels :: FilePath -> HasHeader -> IO (Either ErrorMsg [(RowNum, SecRel)])
-readSecRels fileName hasHeader = do
-  csv <- parseFromFile csvFile fileName
-  return $ verifyStructure csv hasHeader
-    where
-      verifyStructure (Left parseError) _ = Left $ show parseError
-      verifyStructure (Right rows) NoHeader =
-        sequence $ map verifyRow $ zip [1..] rows
-      verifyStructure (Right rows) SkipHeader =
-        sequence $ map verifyRow $ safeTail $ zip [1..] rows
+toSecRels - converts [(RowNum, [String])] to SecRels
+          - on ok - Right [(RowNum, SecRel)]
+          - on error - Left [ErrorMsg]
+-}
 
-      verifyRow (rowNum, cells) =
-        case (safeHead &&& safeHead . drop 16) cells of
-          (Just secId, Just benchSecId) -> Right $ (rowNum, (secId, benchSecId))
-          (Nothing, _) ->
-            Left $ "Error in row " ++ show rowNum ++ ": no first column"
-          (_, Nothing) ->
-            Left $ "Error in row " ++ show rowNum ++ ": no 17-th column"
+toSecRels :: [(RowNum, [String])] -> Either [ErrorMsg] [(RowNum, SecRel)]
+toSecRels rows = foldl collect (Right []) $ map parseRow rows
+  where
+    -- FIXME: rewrite with nice combinators
+    collect acc eith = case (acc, eith) of
+      (Right rs, Right e) -> Right $ rs ++ [e]
+      (Left ls, Left e) -> Left $ ls ++ [e]
+      (Right _, Left e) -> Left [e]
+      (Left ls, Right _) -> Left ls 
 
-      safeTail [] = []
-      safeTail xs = tail xs
+parseRow :: (RowNum, [String]) -> Either ErrorMsg (RowNum, SecRel) 
+parseRow (rowNum, cells) =
+  case (safeHead &&& safeHead . drop 16) cells of
+    (Just secId, Just benchSecId) -> Right $ (rowNum, (secId, benchSecId))
+    (Nothing, _) ->
+      Left $ "Error in row " ++ show rowNum ++ ": no first column"
+    (_, Nothing) ->
+      Left $ "Error in row " ++ show rowNum ++ ": no 17-th column"
+  where
+    safeHead [] = Nothing
+    safeHead (x: _) = Just x
+  
 
-      safeHead [] = Nothing
-      safeHead (x: _) = Just x
-
+{-
+checkSecRels - checks semantic correctness of SecRels [(SecRel, RowNum)]
+             - on ok - Right ([SecRel], [WarnMsg])
+             - on error - Left [ErrorMsg]
+-}
 
 -- FIXME: State monad in terms of WarnMsg
 checkSecRels :: [(RowNum, SecRel)] -> Either [ErrorMsg] ([SecRel], [WarnMsg])
-checkSecRels xs = do
-  case checkUniqueSecIds xs of
-    Left e -> Left e
-    -- FIXME: finished here
+checkSecRels xs = checkUniqueness xs >>= checkCoherence
 
 
-checkUniqueSecIds :: [(RowNum, SecRel)]
-                  -> Either [ErrorMsg] ([SecRel], [WarnMsg])
-checkUniqueSecIds xs'
-  | null nonUniqueSecIds = Right ((map snd xs'), [])
+checkUniqueness :: [(RowNum, SecRel)]
+                -> Either [ErrorMsg] [(RowNum, SecRel)]
+checkUniqueness xs'
+  | null nonUniqueSecIds = Right xs'
   | otherwise =
       Left $ map (\(secId, rowNums) ->
                    "Duplicate secIds [" ++ secId ++ "] found in lines " ++
@@ -106,12 +162,13 @@ checkUniqueSecIds xs'
                     M.empty $
                     map (fst . snd &&& fst) xs'
 
-checkSecRelsCompletness :: ([(RowNum, SecRel)]) -> ([SecRel], [WarnMsg])
-checkSecRelsCompletness xs =
-  foldl (\acc (rowNum, sr@(_, benchSecId)) ->
-          if S.notMember benchSecId secIdsSet
+-- This never fails, may generate warnings
+checkCoherence :: [(RowNum, SecRel)] -> Either [ErrorMsg] ([SecRel], [WarnMsg])
+checkCoherence xs = Right $
+  foldl (\acc (rowNum, sr@(secId, benchSecId)) ->
+          if S.member benchSecId secIdsSet
           then first (++ [sr]) acc
-          else bimap (++ [sr])
+          else bimap (++ [(secId, "")]) -- FIXME: Maybe here
                      (++ ["Discarded incorrect ref [" ++ benchSecId
                           ++ "] in row " ++ show rowNum])
                      acc)
@@ -119,6 +176,27 @@ checkSecRelsCompletness xs =
         xs
   where
     secIdsSet = S.fromList $ map (fst . snd) xs
+
+
+
+{-
+-- This should be a composition of fns from 1.
+readSecRels - reads csv file
+            - on ok - IO $ Right ([SecRel], [WarnMsg])
+            - on error - IO $ Left [ErrorMsg]
+-}
+
+
+-- FIXME: there has to be a simpler way (liftIO)
+readSecRels :: FilePath -> HasHeader
+            -> IO (Either [ErrorMsg] ([SecRel], [WarnMsg]))
+readSecRels file hasHeader = do
+  csv <- readCsvFile file hasHeader
+  return $ csv >>= toSecRels >>= checkSecRels
+
+
+
+
 
 buildGraph :: [(Int, Maybe Int)] -> Maybe Graph
 buildGraph [] = Nothing
@@ -138,28 +216,27 @@ main :: IO ()
 main = do
   putStrLn "Up and running"
 
-  errorOrSecRels <- readSecRels "test.csv" SkipHeader
-  case errorOrSecRels of
-    Left e -> do
-      putStrLn $ "CSV parse error: " ++ show e
+  errorsOrSecRels <- readSecRels "test.csv" SkipHeader
+  case errorsOrSecRels of
+    Left es -> do
+      putStrLn $ "Errors while processing test.csv file: "
+      mapM_ (putStrLn . ("  " ++)) es
       exitWith $ ExitFailure 1
-    Right secRels -> do
-      case checkSecRels secRels of
-        Left e' -> do
-          putStrLn $ "Invalid security structure: "
-          exitWith $ ExitFailure 2
-        Right (sr, warns) -> do
-          mapM_ putStrLn $ ["Security structure warnings:"] ++ warns
-          putStrLn ("sr has length of " ++ show (length sr))
-          let s2IntMap = secIdToIntMap $ map fst sr
-              srInt = map (bimap (s2IntMap M.!) (flip M.lookup s2IntMap)) sr
+    Right (sr, warns) -> do
+      mapM_ putStrLn $ ["Security structure warnings:"] ++ warns
+      putStrLn ("sr has length of " ++ show (length sr))
 
-            --  dff = (S.fromList (map snd sr)) S.\\ (S.fromList (map fst sr))
-              mg = buildGraph srInt
-          case mg of
-            Just g -> do
-              putStrLn $ "Graph is: " ++ show (outdegree g)
+      case processSecRels sr of
+        Nothing -> putStrLn "Graph construction impossible"
+        Just (g, _) -> putStrLn $ "Graph is: " ++ show (outdegree g)
 
-            Nothing -> putStrLn "Graph construction impossible"
-          --mapM_ (putStrLn . show) dff
-          exitSuccess
+      exitSuccess
+
+processSecRels :: [SecRel] -> Maybe (Graph, M.Map SecId Int)
+processSecRels sr = seqTuple (buildGraph srInt, Just s2IntMap)
+  where
+    s2IntMap = secIdToIntMap $ map fst sr
+    srInt = map (bimap (s2IntMap M.!) (flip M.lookup s2IntMap)) sr
+      --  dff = (S.fromList (map snd sr)) S.\\ (S.fromList (map fst sr))
+    seqTuple (Just x, Just y) = Just (x, y)
+    seqTuple (_, _) = Nothing
