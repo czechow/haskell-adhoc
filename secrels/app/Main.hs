@@ -17,7 +17,7 @@ import qualified Data.Set as S
 
 type SecId = String
 type BenchSecId = SecId
-type SecRel = (SecId, BenchSecId)
+type SecRel = (SecId, Maybe BenchSecId)
 type ErrorMsg = String
 type WarnMsg = String
 type RowNum = Int
@@ -118,12 +118,13 @@ toSecRels rows = foldl collect (Right []) $ map parseRow rows
       (Right rs, Right e) -> Right $ rs ++ [e]
       (Left ls, Left e) -> Left $ ls ++ [e]
       (Right _, Left e) -> Left [e]
-      (Left ls, Right _) -> Left ls 
+      (Left ls, Right _) -> Left ls
 
-parseRow :: (RowNum, [String]) -> Either ErrorMsg (RowNum, SecRel) 
+parseRow :: (RowNum, [String]) -> Either ErrorMsg (RowNum, SecRel)
 parseRow (rowNum, cells) =
   case (safeHead &&& safeHead . drop 16) cells of
-    (Just secId, Just benchSecId) -> Right $ (rowNum, (secId, benchSecId))
+    (Just secId, Just "") -> Right (rowNum, (secId, Nothing))
+    (Just secId, Just benchSecId) -> Right (rowNum, (secId, Just benchSecId))
     (Nothing, _) ->
       Left $ "Error in row " ++ show rowNum ++ ": no first column"
     (_, Nothing) ->
@@ -131,7 +132,7 @@ parseRow (rowNum, cells) =
   where
     safeHead [] = Nothing
     safeHead (x: _) = Just x
-  
+
 
 {-
 checkSecRels - checks semantic correctness of SecRels [(SecRel, RowNum)]
@@ -165,13 +166,15 @@ checkUniqueness xs'
 -- This never fails, may generate warnings
 checkCoherence :: [(RowNum, SecRel)] -> Either [ErrorMsg] ([SecRel], [WarnMsg])
 checkCoherence xs = Right $
-  foldl (\acc (rowNum, sr@(secId, benchSecId)) ->
-          if S.member benchSecId secIdsSet
-          then first (++ [sr]) acc
-          else bimap (++ [(secId, "")]) -- FIXME: Maybe here
-                     (++ ["Discarded incorrect ref [" ++ benchSecId
-                          ++ "] in row " ++ show rowNum])
-                     acc)
+  foldl (\acc (rowNum, sr@(secId, maybeBenchSecId)) ->
+          case maybeBenchSecId of
+            Just benchSecId ->
+              if S.member benchSecId secIdsSet
+              then first (++ [sr]) acc
+              else bimap (++ [(secId, Nothing)])
+                         (++ ["Discarded incorrect ref [" ++ benchSecId
+                              ++ "] in row " ++ show rowNum]) acc
+            Nothing -> first (++ [sr]) acc)
         ([], [])
         xs
   where
@@ -233,10 +236,13 @@ main = do
       exitSuccess
 
 processSecRels :: [SecRel] -> Maybe (Graph, M.Map SecId Int)
-processSecRels sr = seqTuple (buildGraph srInt, Just s2IntMap)
+processSecRels srs = seqTuple (buildGraph srInt, Just s2IntMap)
   where
-    s2IntMap = secIdToIntMap $ map fst sr
-    srInt = map (bimap (s2IntMap M.!) (flip M.lookup s2IntMap)) sr
-      --  dff = (S.fromList (map snd sr)) S.\\ (S.fromList (map fst sr))
+    s2IntMap = secIdToIntMap $ map fst srs
+    srInt = map (bimap (s2IntMap M.!)
+                       (\mx ->  case mx of
+                         Just x -> (flip M.lookup s2IntMap x)
+                         Nothing -> Nothing
+                       )) srs
     seqTuple (Just x, Just y) = Just (x, y)
     seqTuple (_, _) = Nothing
