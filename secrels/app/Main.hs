@@ -10,6 +10,8 @@ import System.Exit
 import Data.Ord
 import Data.Either.Combinators (mapBoth, mapRight)
 
+import Control.Monad (liftM)
+
 
 import Text.ParserCombinators.Parsec
 import qualified Data.Map as M
@@ -198,9 +200,6 @@ readSecRels file hasHeader = do
   return $ csv >>= toSecRels >>= checkSecRels
 
 
-
-
-
 buildGraph :: [(Int, Maybe Int)] -> Maybe Graph
 buildGraph [] = Nothing
 buildGraph srInt = Just $ buildG bounds edges'
@@ -240,9 +239,6 @@ processSecRels srs = seqTuple (buildGraph srInt, Just s2IntMap)
   where
     s2IntMap = secIdToIntMap $ map fst srs
     srInt = map (bimap (s2IntMap M.!)
-                       (\mx ->  case mx of
-                         Just x -> (flip M.lookup s2IntMap x)
-                         Nothing -> Nothing
-                       )) srs
+                       ((flip M.lookup s2IntMap) =<<)) srs
     seqTuple (Just x, Just y) = Just (x, y)
     seqTuple (_, _) = Nothing
