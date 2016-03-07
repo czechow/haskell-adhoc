@@ -1,6 +1,6 @@
 module Main where
 
-import Data.Graph
+import qualified Data.Graph as G
 import Data.List
 import Data.CSV
 import Data.Tuple
@@ -9,9 +9,6 @@ import Data.Bifunctor
 import System.Exit
 import Data.Ord
 import Data.Either.Combinators (mapBoth, mapRight)
-
-import Control.Monad (liftM)
-
 
 import Text.ParserCombinators.Parsec
 import qualified Data.Map as M
@@ -142,9 +139,10 @@ checkSecRels - checks semantic correctness of SecRels [(SecRel, RowNum)]
              - on error - Left [ErrorMsg]
 -}
 
--- FIXME: State monad in terms of WarnMsg
+-- FIXME: State monad in terms of WarnMsg?
 checkSecRels :: [(RowNum, SecRel)] -> Either [ErrorMsg] ([SecRel], [WarnMsg])
-checkSecRels xs = checkUniqueness xs >>= checkCoherence
+checkSecRels xs =
+  return xs >>= checkUniqueness >>= checkCoherence
 
 
 checkUniqueness :: [(RowNum, SecRel)]
@@ -170,13 +168,14 @@ checkCoherence :: [(RowNum, SecRel)] -> Either [ErrorMsg] ([SecRel], [WarnMsg])
 checkCoherence xs = Right $
   foldl (\acc (rowNum, sr@(secId, maybeBenchSecId)) ->
           case maybeBenchSecId of
+            Nothing -> first (++ [sr]) acc
             Just benchSecId ->
               if S.member benchSecId secIdsSet
               then first (++ [sr]) acc
               else bimap (++ [(secId, Nothing)])
                          (++ ["Discarded incorrect ref [" ++ benchSecId
                               ++ "] in row " ++ show rowNum]) acc
-            Nothing -> first (++ [sr]) acc)
+        )
         ([], [])
         xs
   where
@@ -192,24 +191,24 @@ readSecRels - reads csv file
 -}
 
 
--- FIXME: there has to be a simpler way (liftIO)
+-- FIXME: there has to be a simpler way...
 readSecRels :: FilePath -> HasHeader
             -> IO (Either [ErrorMsg] ([SecRel], [WarnMsg]))
-readSecRels file hasHeader = do
-  csv <- readCsvFile file hasHeader
-  return $ csv >>= toSecRels >>= checkSecRels
+readSecRels file hasHeader =
+  readCsvFile file hasHeader >>= \csv ->
+    return (csv >>= toSecRels >>= checkSecRels)
 
 
-buildGraph :: [(Int, Maybe Int)] -> Maybe Graph
+buildGraph :: [(Int, Maybe Int)] -> Maybe G.Graph
 buildGraph [] = Nothing
-buildGraph srInt = Just $ buildG bounds edges'
+buildGraph srInt = Just $ G.buildG bounds edges'
   where
-    bounds = (foldl1 min sInt, foldl1 max sInt)
+    bounds = (foldl1 min &&& foldl1 max) sInt
     sInt = map fst srInt
     edges' = foldl (\acc (s, mbs) -> case mbs of
                      Just bs -> acc ++ [(bs, s)]
                      Nothing -> acc)
-            [] srInt
+             [] srInt
 
 
 data HasHeader = NoHeader | SkipHeader
@@ -230,15 +229,18 @@ main = do
 
       case processSecRels sr of
         Nothing -> putStrLn "Graph construction impossible"
-        Just (g, _) -> putStrLn $ "Graph is: " ++ show (outdegree g)
+        Just (g, _) ->
+
+          putStrLn $ "Graph is: " ++ show (reverse $ sort $ map length $ G.components g)
 
       exitSuccess
 
-processSecRels :: [SecRel] -> Maybe (Graph, M.Map SecId Int)
+processSecRels :: [SecRel] -> Maybe (G.Graph, M.Map SecId Int)
 processSecRels srs = seqTuple (buildGraph srInt, Just s2IntMap)
   where
     s2IntMap = secIdToIntMap $ map fst srs
     srInt = map (bimap (s2IntMap M.!)
-                       ((flip M.lookup s2IntMap) =<<)) srs
+                       ((flip M.lookup s2IntMap) =<<)
+                ) srs
     seqTuple (Just x, Just y) = Just (x, y)
     seqTuple (_, _) = Nothing
