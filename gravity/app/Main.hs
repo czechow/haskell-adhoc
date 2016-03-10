@@ -3,6 +3,7 @@
 module Main where
 
 import Text.XML.HXT.Core
+import qualified Text.XML.HXT.DOM.XmlNode as XN
 
 -- data Guest = Guest { firstName :: String
 --                    , lastName :: String }
@@ -24,7 +25,7 @@ import Text.XML.HXT.Core
 
 main :: IO ()
 main = do
-  xml <- readFile "s2.xml"
+  xml <- readFile "s2s.xml"
   let doc = readString [withWarnings yes] xml
   eps <- runX $ doc >>> getRoot >>> getEndpoints
   rts <- runX $ doc >>> getRoot >>> getRoutes
@@ -40,12 +41,15 @@ getEndpoints = proc x -> do
 
 type Name = String
 type From = String
+type To = String
 
-data Route = Route { name :: Name, from :: From}
+data Route = Route { name :: Name, from :: From, to :: To }
            deriving (Show)
 
 getRoutes = proc x -> do
   rt <- deep (hasName "route" <+> hasName "camel:route" <<< isElem) -< x
   froms <- getAttrValue "uri" <<< deep (hasName "from") <<< returnA -< rt
-  rtn <- getAttrValue "id" <<< returnA -< rt
-  returnA -< Route rtn froms
+  tos <- deep (hasName "to") -< rt
+  rtn <- getAttrValue "id" -< rt
+  tons <- listA $ getAttrValue "uri" -< tos
+  returnA -< Route rtn froms (show tons)
