@@ -15,3 +15,6 @@ run: build
 
 repl:
 	stack ghci --main-is $(TARGET):exe:$(TARGET)
+
+process: build
+	stack exec $(TARGET) | dot -Tpng | display
