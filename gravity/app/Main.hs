@@ -4,6 +4,8 @@ module Main where
 
 import Text.XML.HXT.Core
 import Data.List (nub)
+import Data.List.Utils (replace)
+
 
 type Name = String
 type From = String
@@ -16,7 +18,9 @@ data Route = Route { name :: Name, from :: From, to :: To }
 sanitize :: [Route] -> [Route]
 sanitize xs = map cleanNames xs
   where
-    cleanNames r = r { to = (takeWhile (/=':') $ to r) }
+    cleanNames r = r { from = cleanFrom $ from r
+                     , to = (takeWhile (/=':') $ to r) }
+    cleanFrom = (takeWhile (/='?')) . (replace "timer://" "")
 
 outputGraph :: [Route] -> IO ()
 outputGraph xs = do
@@ -40,6 +44,7 @@ getRoot = deep (isElem >>> hasName "camel:camelContext")
 getRoute = proc x -> do
   rt <- deep (hasName "route" <+> hasName "camel:route" <<< isElem) -< x
   from' <- getAttrValue "uri" <<< deep (hasName "from") <<< returnA -< rt
-  to' <- getAttrValue "uri" <<< deep (hasName "to" <+> hasName "wireTap") -< rt
+  to' <- getAttrValue "uri" <<<
+         deep (hasName "camel:to" <+> hasName "to" <+> hasName "wireTap") -< rt
   name' <- getAttrValue "id" -< rt
   returnA -< Route name' from' to'
