@@ -13,6 +13,9 @@ main = do
   putStrLn "Now pipeline"
   source $$ conduit =$ sink
 
+  putStrLn "Now pipeline2"
+  source $$ conduit2 =$ sink
+
 
 source :: Source IO Int
 source = do
@@ -24,3 +27,23 @@ conduit = CL.map $ show . (+3)
 
 sink :: Sink String IO ()
 sink = CL.mapM_ putStrLn
+
+conduit2 :: Conduit Int IO String
+conduit2 = do
+  mi <- await
+  case mi of
+    Just i -> do
+      yield $ show i
+      conduit2
+    Nothing -> return ()
+
+
+-- Takes in a value (if there is no value, what should we do?)
+awFor :: Monad m => (i -> ConduitM i o m r) -> ConduitM i o m ()
+awFor f = do
+  mi <- await
+  case mi of
+    Just i -> do
+      _ <- f i
+      awFor f
+    Nothing -> return ()
