@@ -16,6 +16,8 @@ main = do
   putStrLn "Now pipeline2"
   source $$ conduit2 =$ sink
 
+  putStrLn "Triple test"
+  source $= triple $$ sink
 
 source :: Source IO Int
 source = do
@@ -46,4 +48,15 @@ awFor f = do
     Just i -> do
       _ <- f i
       awFor f
+    Nothing -> return ()
+
+triple :: (Monad m, Show a) => Conduit a m String
+triple = do
+  mi <- await
+  case mi of
+    Just i -> do
+      --mapM_ (\_ -> yield (show i)) [1::Int .. 3]
+      --liftM (replicate 3) (yield show i)
+      CL.sourceList $ replicate 3 (show i)
+      triple
     Nothing -> return ()
