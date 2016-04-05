@@ -1,6 +1,9 @@
 module Main where
 
-import Lib
+import qualified Invoice as I
 
 main :: IO ()
-main = someFunc
+main = do
+  putStrLn "Up and running"
+  let cust = I.CustomerInfo 12 "NAME"
+  putStrLn $ show cust
