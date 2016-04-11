@@ -74,6 +74,9 @@ newtype T1 = T1 Tick
 newtype O1 = O1 [Int]
 newtype O2 = O2 Bool
 
+instance Show O2 where
+  show (O2 x) = show x
+
 is1 :: S1
 is1 = S1 $ []
 
@@ -81,10 +84,14 @@ is3 :: S3
 is3 =  S3 $ 0
 
 f1 :: I1 -> S1 -> (S1, O1)
-f1 (I1 (RFQ rfqId _)) (S1 ss) = (S1 $ rfqId : ss, O1 $ rfqId : ss)
+f1 (I1 (RFQ rfqId _)) (S1 ss) =
+  let newState = rfqId : ss
+  in (S1 $ newState, O1 $ newState)
 
 f3 :: (O1, T1) -> S3 -> (S3, O2)
-f3 (O1 rfqs, T1 _) (S3 _) = (S3 $ length rfqs, O2 $ length rfqs >= 3)
+f3 (O1 rfqs, T1 _) (S3 _) =
+  let ln = length rfqs
+  in (S3 $ ln, O2 $ ln >= 3)
 
 -- This needs monadic state...
 -- Entry to the function is the state of all rules plus
@@ -101,36 +108,12 @@ fAll (i1, t1) (ps1, ps3) =
   in ((ns1, ns3), o2)
 
 
-
-
-type AllStates = [(String, StateValue Value)]
-type PartialStates = [(String, StateValue Value)]
-
-
--- curr value, states, next value
-f :: StateValue Value -> AllStates -> IO (StateValue Value)
-f x _ = case x of
-  V x' -> do
-    putStrLn $ "Matching single value " ++ show x'
-    case x' of
-      I i -> return $ V $ I $ i + 2
-      S s -> return $ V $ S (s ++ s)
-  L xs -> do
-    putStrLn $ "Matching list " ++ show xs
-    return $ L xs
-  --L (_: xs') -> return $ L xs'
-
-
-allStates :: AllStates
-allStates = [ ("First_Key", V (I 15))
-            , ("Second_Key", L $ [S "x", S "y"])
-            , ("Third_Key", V $ S "x")
-            , ("Fourth_Key", L $ [])]
-
-partialStates :: PartialStates
-partialStates = allStates -- FIXME: hack
-
 main :: IO ()
 main = do
   putStrLn "Up and running"
-  mapM_ ((flip f partialStates) . snd) allStates
+  let (ns1, o) = fAll (I1 $ RFQ 12 "?", T1 0) (is1, is3)
+  putStrLn $ "Output is " ++ show o
+  let (ns2, o2) = fAll (I1 $ RFQ 12 "?", T1 0) ns1
+  putStrLn $ "Output is " ++ show o2
+  let (_, o3) = fAll (I1 $ RFQ 12 "?", T1 0) ns2
+  putStrLn $ "Output is " ++ show o3
