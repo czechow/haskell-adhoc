@@ -1,12 +1,20 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
 module Main where
 
+import Data.Typeable
+import Data.Data
+import Control.Monad.State
 
-class Valuable a where
-  getVal :: a -> a
+
 
 
 data RFQ = RFQ Int String -- and many more...
+         deriving (Show, Eq, Typeable, Data)
 
 -- what is a key???
 -- do we need generic Rule_Key?
@@ -59,18 +67,14 @@ data StateValue a where
 
 -- rule key is a mess because it tries to hide the proper nature of state
 
--- Each "Circle" encapsulates state, rulekey, output
-data Circle s = Circle s
-              deriving (Show, Eq)
-
 type Tick = Int
 
 data Input a = Input a
 
-newtype S1 = S1 [Int]
-newtype S3 = S3 Int
-newtype I1 = I1 RFQ
-newtype T1 = T1 Tick
+newtype S1 = S1 [Int] deriving (Show, Eq, Typeable, Data)
+newtype S3 = S3 Int deriving (Show, Eq, Typeable, Data)
+newtype I1 = I1 RFQ deriving (Show, Eq, Typeable, Data)
+newtype T1 = T1 Tick deriving (Show, Eq, Typeable, Data)
 newtype O1 = O1 [Int]
 newtype O2 = O2 Bool
 
@@ -94,43 +98,42 @@ f3 (O1 rfqs, T1 _) (S3 _) = (S3 $ length rfqs, O2 $ length rfqs >= 3)
 -- Or a state constructed as a result of DSL application
 type AllS = (S1, S3)
 
+-- let's assume we have
+
+-- State monad == StateProcess monad
+
+first :: (a -> a) -> (a, b) -> (a, b)
+first f (x, y) = (f x, y)
+
+second :: (b -> b) -> (a, b) -> (a, b)
+second f (x, y) = (x, f y)
+
+updateFirst :: S1 -> State AllS ()
+updateFirst s1 = do
+  allS <- get
+  put $ first (const s1) allS
+
+updateSecond :: S3 -> State AllS ()
+updateSecond s3 = do
+  allS <- get
+  put $ second (const s3) allS
+
+fStateFul :: (I1, T1) -> State AllS O2
+fStateFul (i1, t1) = do
+  (s1, _) <- get
+  let (ns1, o1) = f1 i1 s1
+  updateFirst ns1
+  (_, s3) <- get
+  let (ns3, o2) = f3 (o1, t1) s3
+  updateSecond ns3
+  return o2
+
 fAll :: (I1, T1) -> AllS -> (AllS, O2)
 fAll (i1, t1) (ps1, ps3) =
   let (ns1, o1) = f1 i1 ps1
       (ns3, o2) = f3 (o1, t1) ps3
   in ((ns1, ns3), o2)
 
-
-
-
-type AllStates = [(String, StateValue Value)]
-type PartialStates = [(String, StateValue Value)]
-
-
--- curr value, states, next value
-f :: StateValue Value -> AllStates -> IO (StateValue Value)
-f x _ = case x of
-  V x' -> do
-    putStrLn $ "Matching single value " ++ show x'
-    case x' of
-      I i -> return $ V $ I $ i + 2
-      S s -> return $ V $ S (s ++ s)
-  L xs -> do
-    putStrLn $ "Matching list " ++ show xs
-    return $ L xs
-  --L (_: xs') -> return $ L xs'
-
-
-allStates :: AllStates
-allStates = [ ("First_Key", V (I 15))
-            , ("Second_Key", L $ [S "x", S "y"])
-            , ("Third_Key", V $ S "x")
-            , ("Fourth_Key", L $ [])]
-
-partialStates :: PartialStates
-partialStates = allStates -- FIXME: hack
-
 main :: IO ()
 main = do
   putStrLn "Up and running"
-  mapM_ ((flip f partialStates) . snd) allStates
