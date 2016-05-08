@@ -73,14 +73,22 @@ runRule inputs fS l = do
   put nst
   return $ o
 
+runRule2 :: i -> (i -> s -> (o, s)) -> Lens' AllStates s -> State AllStates o
+runRule2 inputs fS l = do
+  st <- get
+  let s = view l st
+      (o, s') = fS inputs s
+  put $ set l s' st
+  return $ o
+
 
 allLogic :: Maybe I1 -> Maybe I2 -> State AllStates O2
 allLogic mi1 mi2 = do
   case (mi1, mi2) of
     (Just i1, Just i2) -> do
-      _ <- runRule (i1, i2) fS1 s1
-      _ <- runRule (i1, i2) fS1 s1
-      o3 <- runRule (i1, i2) fS1 s1
+      _ <- runRule2 (i1, i2) fS1 s1
+      _ <- runRule2 (i1, i2) fS1 s1
+      o3 <- runRule2 (i1, i2) fS1 s1
       return o3
     (_, _) -> undefined
 
@@ -106,7 +114,8 @@ allFn n =
 
 allFn2 :: Int -> Int
 allFn2 n =
-  sum $ map (\i -> let (S1 s1') = _s1 $ snd $ runState (proc2 (I1 i, I2 "x")) allStates
+  sum $ map (\i -> let (S1 s1') =
+                         _s1 $ snd $ runState (proc2 (I1 i, I2 "x")) allStates
                    in length s1')
             [1..n]
 
@@ -115,13 +124,13 @@ allFn2 n =
 
 --allLogic :: Maybe I1 -> Maybe I2 -> State AllStates O2
 
-main :: IO ()
-main = do
-  let (o2, ns) = runState (allLogic (Just $ I1 13) (Just $ I2 "")) allStates
-  putStrLn $ show o2
-  putStrLn $ show ns
 -- main :: IO ()
 -- main = do
---   let n = 10000000
---   putStrLn $ "Up and running for n = " ++ show n
---   putStrLn $ show $ allFn2 n
+--   let (o2, ns) = runState (allLogic (Just $ I1 13) (Just $ I2 "")) allStates
+--   putStrLn $ show o2
+  -- putStrLn $ show ns
+main :: IO ()
+main = do
+  let n = 10000000
+  putStrLn $ "Up and running for n = " ++ show n
+  putStrLn $ show $ allFn2 n
