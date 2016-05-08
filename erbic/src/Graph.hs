@@ -123,13 +123,13 @@ runRule inputs fS l = do
 -- update time info, that's all
 -- perhaps truncating an RFQ queue?
 -- validations: FIXME: disallow running timer in reverse order
-processTimerTick :: Maybe TimerTick -> State RulesState [CbGen]
-processTimerTick Nothing = return []
+processTimerTick :: Maybe TimerTick -> State RulesState ()
+processTimerTick Nothing = return ()
 processTimerTick (Just tick) = do
   runRule tick updateTick sTime
     where
-      updateTick :: TimerTick -> StateTime -> ([CbGen], StateTime)
-      updateTick tick' _ = ([], StateTime $ Just $ unTick tick')
+      updateTick :: TimerTick -> StateTime -> ((), StateTime)
+      updateTick tick' _ = ((), StateTime $ Just $ unTick tick')
 
 processRfq :: Maybe Rfq -> State RulesState [CbGen]
 processRfq Nothing = return []
@@ -157,10 +157,11 @@ calcSldWnd (rfqId', StateTime (Just t)) (StateSldWnd ws) =
 
 processRules :: (Maybe TimerTick, Maybe Rfq) -> State RulesState CbResult
 processRules (mTt, mRfq) = do
-  ttGcbs <- processTimerTick mTt
+  processTimerTick mTt
   rfqGcbs <- processRfq mRfq
+  return (rfqGcbs, []) -- some kind of union, I guess...
 
-  return (ttGcbs ++ rfqGcbs, []) -- some kind of union, I guess...
+
 
 inputData :: [(Maybe TimerTick, Maybe Rfq)]
 inputData = [ (Just $ TimerTick 10, Nothing)
