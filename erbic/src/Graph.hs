@@ -19,7 +19,6 @@ module Graph
 
 import Control.Lens
 import Control.Monad.State
-import Data.Maybe
 import Data.List
 import Data.Ord
 import qualified Text.Show.Pretty as Pr
@@ -55,6 +54,24 @@ type Time = Integer
 
 newtype TimerTick = TimerTick { unTick :: Time } -- as milliseconds...
 
+type TimeSpan = Integer
+
+newtype SldWndTime = SldWndTime Time
+                   deriving Show
+
+newtype SldWndCnt = SldWndCnt Int
+                  deriving Show
+
+data Params = Params { _sldWndTime :: SldWndTime
+                     , _sldWndCnt :: SldWndCnt
+                     }
+            deriving Show
+
+makeParams :: Time -> Int -> Params
+makeParams t c = Params (SldWndTime t) (SldWndCnt c)
+
+makeLenses ''Params
+
 -------------------------------------------------------------------------------
 --                             Circuit breakers
 -------------------------------------------------------------------------------
@@ -63,12 +80,9 @@ data CbState = Triggered
              | Armed
              deriving Show
 
-data CbGen = CbGen { cbgState :: CbState, cbgDesc :: String }
-           deriving Show
-
-data CbRfq = CbRfq { cbrRfqId :: RfqId, cbrState :: CbState, cbrDesc :: String }
-           deriving Show
-
+data Cb = CbGen { cbgState :: CbState, cbgDesc :: String }
+        | CbRfq { cbrRfqId :: RfqId, cbrState :: CbState, cbrDesc :: String }
+        deriving Show
 
 -------------------------------------------------------------------------------
 --                               Rule states
@@ -85,25 +99,30 @@ newtype StateRfq = StateRfq [Rfq]
 newtype StateSldWnd = StateSldWnd [(Time, RfqId)]
                     deriving Show
 
-newtype StateTime = StateTime (Maybe Time)
+newtype StateTime = StateTime Time
+                    deriving Show
+
+newtype StateParams = StateParams Params
                     deriving Show
 -------------------------------------------------------------------------------
 --                               Main logic
 -------------------------------------------------------------------------------
-type CbResult = ([CbGen], [CbRfq])
+type CbResult = [Cb]
 
 data RulesState = RulesState { _sTime :: StateTime
                              , _sRfq :: StateRfq
                              , _sSldWnd :: StateSldWnd
+                             , _sParams :: StateParams
                              }
                 deriving Show
 
 makeLenses ''RulesState
 
 initialState :: RulesState
-initialState = RulesState { _sTime = StateTime Nothing
+initialState = RulesState { _sTime = StateTime 0
                           , _sRfq = StateRfq []
                           , _sSldWnd = StateSldWnd []
+                          , _sParams = StateParams $ makeParams 15 3
                           }
 
 runRule :: i -> (i -> s -> (o, s)) -> Lens' RulesState s -> State RulesState o
@@ -115,13 +134,7 @@ runRule inputs fS l = do
   return $ o
 
 
--- Write is as easily as you can
--- Monads will come later
-
-
-
 -- update time info, that's all
--- perhaps truncating an RFQ queue?
 -- validations: FIXME: disallow running timer in reverse order
 processTimerTick :: Maybe TimerTick -> State RulesState ()
 processTimerTick Nothing = return ()
@@ -129,53 +142,70 @@ processTimerTick (Just tick) = do
   runRule tick updateTick sTime
     where
       updateTick :: TimerTick -> StateTime -> ((), StateTime)
-      updateTick tick' _ = ((), StateTime $ Just $ unTick tick')
+      updateTick tick' _ = ((), StateTime $ unTick tick')
 
-processRfq :: Maybe Rfq -> State RulesState [CbGen]
+processParams :: Maybe Params -> State RulesState ()
+processParams Nothing = return ()
+processParams (Just params) = do
+  runRule params updateParams sParams
+    where
+      updateParams :: Params -> StateParams -> ((), StateParams)
+      updateParams params' _ = ((), StateParams params')
+
+processRfq :: Maybe Rfq -> State RulesState [Cb]
 processRfq Nothing = return []
 processRfq (Just rfq) = do
   rfqGcbs <- runRule rfq addRfq sRfq
-  st <- get
-  sldWndGcbs <- runRule (_rfqId rfq, view sTime st) calcSldWnd sSldWnd
+  st <- get -- FIXME: any way to get rid of this explicit state
+  let (StateParams p) = view sParams st -- FIXME: remove
+  sldWndGcbs <- runRule (view rfqId rfq, view sTime st,
+                         view sldWndTime p, view sldWndCnt p)
+                        calcSldWnd sSldWnd
   return $ rfqGcbs ++ sldWndGcbs
 
 -- is it ok? Yes, for the time being...
-addRfq :: Rfq -> StateRfq -> ([CbGen], StateRfq)
+addRfq :: Rfq -> StateRfq -> ([Cb], StateRfq)
 addRfq rfq (StateRfq s) = ([], StateRfq $ rfq : s)
 
-calcSldWnd :: (RfqId, StateTime) -> StateSldWnd -> ([CbGen], StateSldWnd)
-calcSldWnd (_, StateTime Nothing) _ = error("timer not set, fail...")
-calcSldWnd (rfqId', StateTime (Just t)) (StateSldWnd ws) =
+calcSldWnd :: (RfqId, StateTime, SldWndTime, SldWndCnt)
+           -> StateSldWnd
+           -> ([Cb], StateSldWnd)
+calcSldWnd (rfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
+           (StateSldWnd ws) =
   (cbs, StateSldWnd ws')
   where
-    ws' = dropWhile ((>15) . (flip subtract t) . fst) $
-          sortBy (comparing fst) $ (t, rfqId') : ws
-    cbs = if (length $ take 3 ws') == 3
-          then [CbGen Triggered "Too many RFQs (XX) in YY secs"]
+    ws' = dropWhile ((>swt) . (flip subtract t) . fst) $
+                    sortBy (comparing fst) $ (t, rfqId') : ws
+    cbs = if (length $ take swc ws') == swc
+          then [CbGen Triggered $
+                "Too many RFQs (limit is " ++ show swc ++ ") in " ++
+                show swt ++ " secs"]
           else []
 
 
-processRules :: (Maybe TimerTick, Maybe Rfq) -> State RulesState CbResult
-processRules (mTt, mRfq) = do
+processRules :: (Maybe TimerTick, Maybe Params, Maybe Rfq)
+             -> State RulesState CbResult
+processRules (mTt, mParams, mRfq) = do
   processTimerTick mTt
+  processParams mParams
   rfqGcbs <- processRfq mRfq
-  return (rfqGcbs, []) -- some kind of union, I guess...
+  return rfqGcbs
 
 
 
-inputData :: [(Maybe TimerTick, Maybe Rfq)]
-inputData = [ (Just $ TimerTick 10, Nothing)
-            , (Nothing, Just $ makeRfq 1 RfqStateOpen 13 997)
-            , (Just $ TimerTick 11, Nothing)
-            , (Nothing, Just $ makeRfq 2 RfqStateOpen 14 998)
-            , (Just $ TimerTick 25, Nothing)
-            , (Nothing, Just $ makeRfq 3 RfqStateOpen 15 999)
-            , (Just $ TimerTick 35, Nothing)
-            , (Nothing, Just $ makeRfq 4 RfqStateOpen 16 1000)
+inputData :: [(Maybe TimerTick, Maybe Params, Maybe Rfq)]
+inputData = [ (Just $ TimerTick 10, Nothing, Nothing)
+            , (Nothing, Nothing, Just $ makeRfq 1 RfqStateOpen 13 997)
+            , (Just $ TimerTick 11, Nothing, Nothing)
+            , (Nothing, Nothing, Just $ makeRfq 2 RfqStateOpen 14 998)
+            , (Just $ TimerTick 25, Nothing, Nothing)
+            , (Nothing, Nothing, Just $ makeRfq 3 RfqStateOpen 15 999)
+            , (Just $ TimerTick 35, Just $ makeParams 15 2, Nothing)
+            , (Nothing, Nothing, Just $ makeRfq 4 RfqStateOpen 16 1000)
             ]
 
 initialOutput :: CbResult
-initialOutput = ([], [])
+initialOutput = []
 
 go :: IO ()
 go = do
