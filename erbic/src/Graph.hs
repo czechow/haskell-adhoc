@@ -143,11 +143,16 @@ processTimerTick (Just tick) = do
       updateTick :: TimerTick -> StateTime -> ((), StateTime)
       updateTick tick' _ = ((), StateTime $ unTick tick')
 
-processParams :: Maybe Params -> State RulesState ()
-processParams Nothing = return ()
+processParams :: Maybe Params -> State RulesState CbResult
+processParams Nothing = return []
 processParams (Just params) = do
-  runRule params (\ps _ -> ((), ps)) sParams
-  -- here we might want to do something more
+  _ <- runRule params (\ps _ -> ((), ps)) sParams
+  st <- get
+  runRule (Nothing,
+           view sTime st,
+           view (sParams . sldWndTime) st,
+           view (sParams . sldWndCnt) st)
+          calcSldWnd sSldWnd
 
 processRfq :: Maybe Rfq -> State RulesState [Cb]
 processRfq Nothing = return []
@@ -187,10 +192,10 @@ calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
 processRules :: (Maybe TimerTick, Maybe Params, Maybe Rfq)
              -> State RulesState CbResult
 processRules (mTt, mParams, mRfq) = do
-  _   <- processTimerTick mTt
-  _   <- processParams mParams
-  cbs <- processRfq mRfq
-  return cbs
+  _    <- processTimerTick mTt
+  cbs1 <- processParams mParams
+  cbs2 <- processRfq mRfq
+  return $ cbs1 ++ cbs2
 
 
 
@@ -203,6 +208,8 @@ inputData = [ (Just $ TimerTick 10, Nothing, Nothing)
             , (Nothing, Nothing, Just $ makeRfq 3 RfqStateOpen 15 999)
             , (Just $ TimerTick 35, Just $ makeParams 15 2, Nothing)
             , (Nothing, Nothing, Just $ makeRfq 4 RfqStateOpen 16 1000)
+            , (Nothing, Just $ makeParams 15 3, Nothing)
+            , (Nothing, Just $ makeParams 15 1, Nothing)
             ]
 
 initialOutput :: CbResult
