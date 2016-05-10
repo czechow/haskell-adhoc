@@ -22,7 +22,7 @@ import Control.Monad.State
 import Data.List
 import Data.Ord
 import qualified Text.Show.Pretty as Pr
-
+import Control.Applicative
 
 newtype RfqId = RfqId { unRfqId :: Integer }
               deriving Show
@@ -102,8 +102,7 @@ newtype StateSldWnd = StateSldWnd [(Time, RfqId)]
 newtype StateTime = StateTime Time
                     deriving Show
 
-newtype StateParams = StateParams Params
-                    deriving Show
+type StateParams = Params
 -------------------------------------------------------------------------------
 --                               Main logic
 -------------------------------------------------------------------------------
@@ -122,7 +121,7 @@ initialState :: RulesState
 initialState = RulesState { _sTime = StateTime 0
                           , _sRfq = StateRfq []
                           , _sSldWnd = StateSldWnd []
-                          , _sParams = StateParams $ makeParams 15 3
+                          , _sParams = makeParams 15 3
                           }
 
 runRule :: i -> (i -> s -> (o, s)) -> Lens' RulesState s -> State RulesState o
@@ -147,19 +146,18 @@ processTimerTick (Just tick) = do
 processParams :: Maybe Params -> State RulesState ()
 processParams Nothing = return ()
 processParams (Just params) = do
-  runRule params updateParams sParams
-    where
-      updateParams :: Params -> StateParams -> ((), StateParams)
-      updateParams params' _ = ((), StateParams params')
+  runRule params (\ps _ -> ((), ps)) sParams
+  -- here we might want to do something more
 
 processRfq :: Maybe Rfq -> State RulesState [Cb]
 processRfq Nothing = return []
 processRfq (Just rfq) = do
   rfqGcbs <- runRule rfq addRfq sRfq
   st <- get -- FIXME: any way to get rid of this explicit state
-  let (StateParams p) = view sParams st -- FIXME: remove
-  sldWndGcbs <- runRule (view rfqId rfq, view sTime st,
-                         view sldWndTime p, view sldWndCnt p)
+  sldWndGcbs <- runRule (Just $ view rfqId rfq,
+                         view sTime st,
+                         view (sParams . sldWndTime) st,
+                         view (sParams . sldWndCnt) st)
                         calcSldWnd sSldWnd
   return $ rfqGcbs ++ sldWndGcbs
 
@@ -167,29 +165,32 @@ processRfq (Just rfq) = do
 addRfq :: Rfq -> StateRfq -> ([Cb], StateRfq)
 addRfq rfq (StateRfq s) = ([], StateRfq $ rfq : s)
 
-calcSldWnd :: (RfqId, StateTime, SldWndTime, SldWndCnt)
+calcSldWnd :: (Maybe RfqId, StateTime, SldWndTime, SldWndCnt)
            -> StateSldWnd
            -> ([Cb], StateSldWnd)
-calcSldWnd (rfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
+calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
            (StateSldWnd ws) =
-  (cbs, StateSldWnd ws')
+  case mRfqId' of
+    Just rfqId' -> f (calcWs $ (t, rfqId') : ws)
+    Nothing -> f (calcWs ws)
   where
-    ws' = dropWhile ((>swt) . (flip subtract t) . fst) $
-                    sortBy (comparing fst) $ (t, rfqId') : ws
-    cbs = if (length $ take swc ws') == swc
-          then [CbGen Triggered $
-                "Too many RFQs (limit is " ++ show swc ++ ") in " ++
-                show swt ++ " secs"]
-          else []
+    f = (,) <$> calcCbs <*> StateSldWnd -- AppFunct Reader instance
+    calcWs ws' = dropWhile ((>swt) . (flip subtract t) . fst) $
+                           sortBy (comparing fst) $ ws' -- sort avoided if pq
+    calcCbs ws' = if (length $ take swc $ ws') == swc
+                  then [CbGen Triggered $
+                        "Too many RFQs (limit is " ++ show swc ++ ") in " ++
+                        show swt ++ " secs"]
+                  else []
 
 
 processRules :: (Maybe TimerTick, Maybe Params, Maybe Rfq)
              -> State RulesState CbResult
 processRules (mTt, mParams, mRfq) = do
-  processTimerTick mTt
-  processParams mParams
-  rfqGcbs <- processRfq mRfq
-  return rfqGcbs
+  _   <- processTimerTick mTt
+  _   <- processParams mParams
+  cbs <- processRfq mRfq
+  return cbs
 
 
 
@@ -212,5 +213,5 @@ go = do
   putStrLn $ "Initial state: [" ++ show initialState ++ "]"
   let allRes = scanl (\(_, st) inputs -> runState (processRules inputs) st)
                      (initialOutput, initialState) inputData
-  putStrLn $ "Result after all calcs:"
+  putStrLn $ "Result after all steps:"
   putStrLn $ Pr.ppShow allRes
