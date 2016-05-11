@@ -158,7 +158,7 @@ processRfq :: Maybe Rfq -> State RulesState [Cb]
 processRfq Nothing = return []
 processRfq (Just rfq) = do
   rfqGcbs <- runRule rfq addRfq sRfq
-  st <- get -- FIXME: any way to get rid of this explicit state
+  st <- get
   sldWndGcbs <- runRule (Just $ view rfqId rfq,
                          view sTime st,
                          view (sParams . sldWndTime) st,
