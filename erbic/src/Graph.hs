@@ -202,9 +202,9 @@ calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
 processRules :: (Maybe TimerTick, Maybe Params, Maybe Rfq)
              -> State RulesState [Cb]
 processRules (mTt, mParams, mRfq) =
-  concat <$> sequence [ processTimerTick mTt
-                      , processParams mParams
-                      , processRfq mRfq ]
+   liftM concat $ sequence [ processTimerTick mTt
+                           , processParams mParams
+                           , processRfq mRfq ]
 
 
 inputData :: [(Maybe TimerTick, Maybe Params, Maybe Rfq)]
