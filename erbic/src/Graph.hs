@@ -22,27 +22,27 @@ import Control.Monad.State
 import Data.List
 import Data.Ord
 import qualified Text.Show.Pretty as Pr
-import Control.Applicative
+
 
 newtype RfqId = RfqId { unRfqId :: Integer }
-              deriving Show
+              deriving (Show, Eq)
 
 data RfqState = RfqStateOpen
               | RfqStateClosed
-              deriving Show
+              deriving (Show, Eq)
 
 newtype RfqQuantity = RfqQuantity { unRfqQuantity :: Integer }
-                    deriving Show
+                    deriving (Show, Eq)
 
 newtype RfqValue = RfqValue { unRfqValue :: Integer }
-                 deriving Show
+                 deriving (Show, Eq)
 
 data Rfq = Rfq { _rfqId :: RfqId
                , _rfqState :: RfqState
                , _rfqQuantity :: RfqQuantity
                , _rfqValue :: RfqValue
                }
-         deriving Show
+         deriving (Show, Eq)
 
 makeRfq :: Integer -> RfqState -> Integer -> Integer -> Rfq
 makeRfq rfqId' rfqState' rfqQuantity' rfqValue' =
@@ -57,15 +57,15 @@ newtype TimerTick = TimerTick { unTick :: Time } -- as milliseconds...
 type TimeSpan = Integer
 
 newtype SldWndTime = SldWndTime Time
-                   deriving Show
+                    deriving (Show, Eq)
 
 newtype SldWndCnt = SldWndCnt Int
-                  deriving Show
+                  deriving (Show, Eq)
 
 data Params = Params { _sldWndTime :: SldWndTime
                      , _sldWndCnt :: SldWndCnt
                      }
-            deriving Show
+            deriving (Show, Eq)
 
 makeParams :: Time -> Int -> Params
 makeParams t c = Params (SldWndTime t) (SldWndCnt c)
@@ -78,11 +78,17 @@ makeLenses ''Params
 
 data CbState = Triggered
              | Armed
-             deriving Show
+             deriving (Show, Eq)
+
+data CbiLevel = CbiWarn
+              | CbiError
+              | CbiInfo
+              deriving (Show, Eq)
 
 data Cb = CbGen { cbgState :: CbState, cbgDesc :: String }
         | CbRfq { cbrRfqId :: RfqId, cbrState :: CbState, cbrDesc :: String }
-        deriving Show
+        | CbImpl { cbiLevel :: CbiLevel,  cbiDescr :: String }
+        deriving (Show, Eq)
 
 -------------------------------------------------------------------------------
 --                               Rule states
@@ -94,13 +100,13 @@ data OperationMode = OmEnabled
 
 -- FIXME: more advanced data structure here: like priority queue?
 newtype StateRfq = StateRfq [Rfq]
-                 deriving Show
+                 deriving (Show, Eq)
 
 newtype StateSldWnd = StateSldWnd [(Time, RfqId)]
-                    deriving Show
+                    deriving (Show, Eq)
 
 newtype StateTime = StateTime Time
-                    deriving Show
+                     deriving (Show, Eq)
 
 type StateParams = Params
 -------------------------------------------------------------------------------
@@ -113,7 +119,7 @@ data RulesState = RulesState { _sTime :: StateTime
                              , _sSldWnd :: StateSldWnd
                              , _sParams :: StateParams
                              }
-                deriving Show
+                deriving (Show, Eq)
 
 makeLenses ''RulesState
 
@@ -133,15 +139,19 @@ runRule inputs fS l = do
   return $ o
 
 
--- update time info, that's all
--- validations: FIXME: disallow running timer in reverse order
-processTimerTick :: Maybe TimerTick -> State RulesState ()
-processTimerTick Nothing = return ()
+processTimerTick :: Maybe TimerTick -> State RulesState CbResult
+processTimerTick Nothing = return []
 processTimerTick (Just tick) = do
   runRule tick updateTick sTime
     where
-      updateTick :: TimerTick -> StateTime -> ((), StateTime)
-      updateTick tick' _ = ((), StateTime $ unTick tick')
+      updateTick :: TimerTick -> StateTime -> (CbResult, StateTime)
+      updateTick (TimerTick t) (StateTime prevT)
+        | prevT <= t = ([], StateTime t)
+        | otherwise  = ([CbImpl CbiWarn $
+                         "Ignoring new time tick of [" ++ show t ++
+                         "] because it is in the past (current: [" ++
+                         show prevT ++ "])"]
+                       , StateTime prevT)
 
 processParams :: Maybe Params -> State RulesState CbResult
 processParams Nothing = return []
@@ -190,13 +200,11 @@ calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
 
 
 processRules :: (Maybe TimerTick, Maybe Params, Maybe Rfq)
-             -> State RulesState CbResult
-processRules (mTt, mParams, mRfq) = do
-  _    <- processTimerTick mTt
-  cbs1 <- processParams mParams
-  cbs2 <- processRfq mRfq
-  return $ cbs1 ++ cbs2
-
+             -> State RulesState [Cb]
+processRules (mTt, mParams, mRfq) =
+  concat <$> sequence [ processTimerTick mTt
+                      , processParams mParams
+                      , processRfq mRfq ]
 
 
 inputData :: [(Maybe TimerTick, Maybe Params, Maybe Rfq)]
@@ -210,6 +218,7 @@ inputData = [ (Just $ TimerTick 10, Nothing, Nothing)
             , (Nothing, Nothing, Just $ makeRfq 4 RfqStateOpen 16 1000)
             , (Nothing, Just $ makeParams 15 3, Nothing)
             , (Nothing, Just $ makeParams 15 1, Nothing)
+            , (Just $ TimerTick 34, Nothing, Nothing)
             ]
 
 initialOutput :: CbResult
