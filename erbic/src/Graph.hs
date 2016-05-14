@@ -53,6 +53,7 @@ makeLenses ''Rfq
 type Time = Integer
 
 newtype TimerTick = TimerTick { unTick :: Time } -- as milliseconds...
+                  deriving (Show)
 
 type TimeSpan = Integer
 
@@ -112,6 +113,12 @@ type StateParams = Params
 -------------------------------------------------------------------------------
 --                               Main logic
 -------------------------------------------------------------------------------
+data InputMessage = ImTimer TimerTick
+                  | ImParams Params
+                  | ImRfq Rfq
+                  | ImDelRfq RfqId
+                  deriving Show
+
 type CbResult = [Cb]
 
 data RulesState = RulesState { _sTime :: StateTime
@@ -123,12 +130,14 @@ data RulesState = RulesState { _sTime :: StateTime
 
 makeLenses ''RulesState
 
+
 initialState :: RulesState
 initialState = RulesState { _sTime = StateTime 0
                           , _sRfq = StateRfq []
                           , _sSldWnd = StateSldWnd []
                           , _sParams = makeParams 15 3
                           }
+
 
 runRule :: i -> (i -> s -> (o, s)) -> Lens' RulesState s -> State RulesState o
 runRule inputs fS l = do
@@ -139,9 +148,8 @@ runRule inputs fS l = do
   return $ o
 
 
-processTimerTick :: Maybe TimerTick -> State RulesState CbResult
-processTimerTick Nothing = return []
-processTimerTick (Just tick) = do
+processTimerTick :: TimerTick -> State RulesState CbResult
+processTimerTick tick = do
   runRule tick updateTick sTime
     where
       updateTick :: TimerTick -> StateTime -> (CbResult, StateTime)
@@ -153,9 +161,9 @@ processTimerTick (Just tick) = do
                          show prevT ++ "])"]
                        , StateTime prevT)
 
-processParams :: Maybe Params -> State RulesState CbResult
-processParams Nothing = return []
-processParams (Just params) = do
+
+processParams :: Params -> State RulesState CbResult
+processParams params = do
   _ <- runRule params (\ps _ -> ((), ps)) sParams
   st <- get
   runRule (Nothing,
@@ -164,9 +172,9 @@ processParams (Just params) = do
            view (sParams . sldWndCnt) st)
           calcSldWnd sSldWnd
 
-processRfq :: Maybe Rfq -> State RulesState [Cb]
-processRfq Nothing = return []
-processRfq (Just rfq) = do
+
+processRfq :: Rfq -> State RulesState CbResult
+processRfq rfq = do
   rfqGcbs <- runRule rfq addRfq sRfq
   st <- get
   sldWndGcbs <- runRule (Just $ view rfqId rfq,
@@ -176,9 +184,10 @@ processRfq (Just rfq) = do
                         calcSldWnd sSldWnd
   return $ rfqGcbs ++ sldWndGcbs
 
--- is it ok? Yes, for the time being...
+
 addRfq :: Rfq -> StateRfq -> ([Cb], StateRfq)
 addRfq rfq (StateRfq s) = ([], StateRfq $ rfq : s)
+
 
 calcSldWnd :: (Maybe RfqId, StateTime, SldWndTime, SldWndCnt)
            -> StateSldWnd
@@ -198,31 +207,46 @@ calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
                         show swt ++ " secs"]
                   else []
 
+processDelRfq :: RfqId -> State RulesState CbResult
+processDelRfq rfqId' = do
+  liftM concat $ sequence [ runRule rfqId' delRfq sRfq
+                          , runRule rfqId' delRfq2 sSldWnd ]
+    where
+      delRfq :: RfqId -> StateRfq -> ([Cb], StateRfq)
+      delRfq (RfqId rid') _ = ([], StateRfq []) -- FIXME: correct here
+      delRfq2 :: RfqId -> StateSldWnd -> ([Cb], StateSldWnd)
+      delRfq2 (RfqId rid') _ = ([], StateSldWnd []) -- FIXME: correct here
 
-processRules :: (Maybe TimerTick, Maybe Params, Maybe Rfq)
-             -> State RulesState [Cb]
-processRules (mTt, mParams, mRfq) =
-   liftM concat $ sequence [ processTimerTick mTt
-                           , processParams mParams
-                           , processRfq mRfq ]
 
 
-inputData :: [(Maybe TimerTick, Maybe Params, Maybe Rfq)]
-inputData = [ (Just $ TimerTick 10, Nothing, Nothing)
-            , (Nothing, Nothing, Just $ makeRfq 1 RfqStateOpen 13 997)
-            , (Just $ TimerTick 11, Nothing, Nothing)
-            , (Nothing, Nothing, Just $ makeRfq 2 RfqStateOpen 14 998)
-            , (Just $ TimerTick 25, Nothing, Nothing)
-            , (Nothing, Nothing, Just $ makeRfq 3 RfqStateOpen 15 999)
-            , (Just $ TimerTick 35, Just $ makeParams 15 2, Nothing)
-            , (Nothing, Nothing, Just $ makeRfq 4 RfqStateOpen 16 1000)
-            , (Nothing, Just $ makeParams 15 3, Nothing)
-            , (Nothing, Just $ makeParams 15 1, Nothing)
-            , (Just $ TimerTick 34, Nothing, Nothing)
+processRules :: InputMessage -> State RulesState [Cb]
+processRules (ImTimer tt) = processTimerTick tt
+processRules (ImParams params) = processParams params
+processRules (ImRfq rfq) = processRfq rfq
+processRules (ImDelRfq rfqId') = processDelRfq rfqId'
+
+
+-- inputData :: [(Maybe TimerTick, Maybe Params, Maybe Rfq)]
+inputData :: [InputMessage]
+inputData = [ ImTimer $ TimerTick 10
+            , ImRfq $ makeRfq 1 RfqStateOpen 13 997
+            , ImTimer $ TimerTick 11
+            , ImRfq $ makeRfq 2 RfqStateOpen 14 998
+            , ImTimer $ TimerTick 25
+            , ImRfq $ makeRfq 3 RfqStateOpen 15 999
+            , ImTimer $ TimerTick 35
+            , ImParams $ makeParams 15 2
+            , ImRfq $ makeRfq 4 RfqStateOpen 16 1000
+            , ImParams $ makeParams 15 3
+            , ImParams $ makeParams 15 1
+            , ImTimer $ TimerTick 34
+            , ImDelRfq $ RfqId 16
             ]
+
 
 initialOutput :: CbResult
 initialOutput = []
+
 
 go :: IO ()
 go = do
