@@ -101,7 +101,7 @@ data OperationMode = OmEnabled
 newtype StateRfq = StateRfq (Map.Map RfqId Rfq)
                  deriving (Show, Eq)
 
-newtype StateSldWnd = StateSldWnd (PQ.OrdPSQ RfqId Time RfqId)
+newtype StateSldWnd = StateSldWnd (PQ.OrdPSQ RfqId Time ())
                     deriving (Show, Eq)
 
 newtype StateTime = StateTime Time
@@ -193,7 +193,7 @@ calcSldWnd :: (Maybe RfqId, StateTime, SldWndTime, SldWndCnt)
 calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
            (StateSldWnd m) =
   case mRfqId' of
-    Just rfqId' -> f (sldWnd $ PQ.insert rfqId' t rfqId' m)
+    Just rfqId' -> f (sldWnd $ PQ.insert rfqId' t () m)
     Nothing -> f (sldWnd m)
   where
     f = (,) <$> cbs <*> StateSldWnd
