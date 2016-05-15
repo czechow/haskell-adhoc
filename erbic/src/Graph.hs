@@ -19,11 +19,9 @@ module Graph
 
 import Control.Lens
 import Control.Monad.State
-import Data.List
-import Data.Ord
 import qualified Data.Map.Strict as Map
 import qualified Text.Show.Pretty as Pr
-
+import qualified Data.OrdPSQ as PQ
 
 newtype RfqId = RfqId { unRfqId :: Integer }
               deriving (Show, Eq, Ord)
@@ -100,11 +98,10 @@ data OperationMode = OmEnabled
                    deriving Show
 
 
--- FIXME: more advanced data structure here: like priority queue?
 newtype StateRfq = StateRfq (Map.Map RfqId Rfq)
                  deriving (Show, Eq)
 
-newtype StateSldWnd = StateSldWnd [(Time, RfqId)]
+newtype StateSldWnd = StateSldWnd (PQ.OrdPSQ RfqId Time RfqId)
                     deriving (Show, Eq)
 
 newtype StateTime = StateTime Time
@@ -135,7 +132,7 @@ makeLenses ''RulesState
 initialState :: RulesState
 initialState = RulesState { _sTime = StateTime 0
                           , _sRfq = StateRfq Map.empty
-                          , _sSldWnd = StateSldWnd []
+                          , _sSldWnd = StateSldWnd PQ.empty
                           , _sParams = makeParams 15 3
                           }
 
@@ -194,19 +191,29 @@ calcSldWnd :: (Maybe RfqId, StateTime, SldWndTime, SldWndCnt)
            -> StateSldWnd
            -> ([Cb], StateSldWnd)
 calcSldWnd (mRfqId', StateTime t, SldWndTime swt, SldWndCnt swc)
-           (StateSldWnd ws) =
+           (StateSldWnd m) =
   case mRfqId' of
-    Just rfqId' -> f (calcWs $ (t, rfqId') : ws)
-    Nothing -> f (calcWs ws)
+    Just rfqId' -> f (sldWnd $ PQ.insert rfqId' t rfqId' m)
+    Nothing -> f (sldWnd m)
   where
-    f = (,) <$> calcCbs <*> StateSldWnd -- AppFunct Reader instance
-    calcWs ws' = dropWhile ((>swt) . (flip subtract t) . fst) $
-                           sortBy (comparing fst) $ ws' -- sort avoided if pq
-    calcCbs ws' = if (length $ take swc $ ws') == swc
-                  then [CbGen Triggered $
-                        "Too many RFQs (limit is " ++ show swc ++ ") in " ++
-                        show swt ++ " secs"]
-                  else []
+    f = (,) <$> cbs <*> StateSldWnd
+    sldWnd m' = pqDropWhile (\_ te _ -> t - te > 15) m'
+    cbs m' = if PQ.size m' >= swc
+             then [CbGen Triggered $
+                   "Number of RFQs " ++ show (PQ.size m') ++ " in the last " ++
+                   show swt ++ " seconds exceeds the limit of " ++ show swc ]
+             else []
+
+
+pqDropWhile :: (Ord k, Ord p) => (k -> p -> v -> Bool)
+            -> PQ.OrdPSQ k p v
+            -> PQ.OrdPSQ k p v
+pqDropWhile pred' pq = case PQ.findMin pq of
+  Nothing -> pq
+  Just (k, p, v) -> if (pred' k p v)
+                    then pqDropWhile pred' $ PQ.deleteMin pq
+                    else pq
+
 
 processDelRfq :: RfqId -> State RulesState CbResult
 processDelRfq rfqId' = do
@@ -214,9 +221,9 @@ processDelRfq rfqId' = do
                           , runRule rfqId' delRfq2 sSldWnd ]
     where
       delRfq :: RfqId -> StateRfq -> ([Cb], StateRfq)
-      delRfq rid' (StateRfq m) = ([], StateRfq $ Map.delete rid' m)
+      delRfq rfqId'' (StateRfq m) = ([], StateRfq $ Map.delete rfqId'' m)
       delRfq2 :: RfqId -> StateSldWnd -> ([Cb], StateSldWnd)
-      delRfq2 (RfqId rid') _ = ([], StateSldWnd []) -- FIXME: correct here
+      delRfq2 rfqId'' (StateSldWnd m) = ([], StateSldWnd $ PQ.delete rfqId'' m)
 
 
 
