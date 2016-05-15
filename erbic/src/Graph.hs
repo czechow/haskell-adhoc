@@ -21,11 +21,12 @@ import Control.Lens
 import Control.Monad.State
 import Data.List
 import Data.Ord
+import qualified Data.Map.Strict as Map
 import qualified Text.Show.Pretty as Pr
 
 
 newtype RfqId = RfqId { unRfqId :: Integer }
-              deriving (Show, Eq)
+              deriving (Show, Eq, Ord)
 
 data RfqState = RfqStateOpen
               | RfqStateClosed
@@ -100,7 +101,7 @@ data OperationMode = OmEnabled
 
 
 -- FIXME: more advanced data structure here: like priority queue?
-newtype StateRfq = StateRfq [Rfq]
+newtype StateRfq = StateRfq (Map.Map RfqId Rfq)
                  deriving (Show, Eq)
 
 newtype StateSldWnd = StateSldWnd [(Time, RfqId)]
@@ -133,7 +134,7 @@ makeLenses ''RulesState
 
 initialState :: RulesState
 initialState = RulesState { _sTime = StateTime 0
-                          , _sRfq = StateRfq []
+                          , _sRfq = StateRfq Map.empty
                           , _sSldWnd = StateSldWnd []
                           , _sParams = makeParams 15 3
                           }
@@ -186,7 +187,7 @@ processRfq rfq = do
 
 
 addRfq :: Rfq -> StateRfq -> ([Cb], StateRfq)
-addRfq rfq (StateRfq s) = ([], StateRfq $ rfq : s)
+addRfq rfq (StateRfq m) = ([], StateRfq $ Map.insert (view rfqId rfq) rfq m)
 
 
 calcSldWnd :: (Maybe RfqId, StateTime, SldWndTime, SldWndCnt)
@@ -213,7 +214,7 @@ processDelRfq rfqId' = do
                           , runRule rfqId' delRfq2 sSldWnd ]
     where
       delRfq :: RfqId -> StateRfq -> ([Cb], StateRfq)
-      delRfq (RfqId rid') _ = ([], StateRfq []) -- FIXME: correct here
+      delRfq rid' (StateRfq m) = ([], StateRfq $ Map.delete rid' m)
       delRfq2 :: RfqId -> StateSldWnd -> ([Cb], StateSldWnd)
       delRfq2 (RfqId rid') _ = ([], StateSldWnd []) -- FIXME: correct here
 
@@ -240,7 +241,7 @@ inputData = [ ImTimer $ TimerTick 10
             , ImParams $ makeParams 15 3
             , ImParams $ makeParams 15 1
             , ImTimer $ TimerTick 34
-            , ImDelRfq $ RfqId 16
+            , ImDelRfq $ RfqId 4
             ]
 
 
