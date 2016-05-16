@@ -153,10 +153,10 @@ processTimerTick tick = do
       updateTick :: TimerTick -> StateTime -> (CbResult, StateTime)
       updateTick (TimerTick t) (StateTime prevT)
         | prevT <= t = ([], StateTime t)
-        | otherwise  = ([CbImpl CbiWarn $
-                         "Ignoring new time tick of [" ++ show t ++
-                         "] because it is in the past (current: [" ++
-                         show prevT ++ "])"]
+        | otherwise  = ([ CbImpl CbiWarn $
+                          "Ignoring new time tick of [" ++ show t ++
+                          "] because it is in the past (current: [" ++
+                          show prevT ++ "])" ]
                        , StateTime prevT)
 
 

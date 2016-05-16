@@ -1,6 +1,8 @@
 module Adhoc where
 
 import qualified Data.OrdPSQ as PQ
+import Control.Monad.Writer
+import Control.Monad.State
 
 newtype RFQ = RFQ Int deriving (Show, Eq)
 
@@ -23,6 +25,23 @@ pqDropWhile pred' pq = case PQ.findMin pq of
   Just (k, p, v) -> if (pred' k p v)
                     then pqDropWhile pred' $ PQ.deleteMin pq
                     else pq
+
+
+runProc :: WriterT [Int] (State [String]) Int
+runProc = do
+  st <- get
+  put $ "Something here" : st
+  tell [997]
+  tell [334]
+  return 13
+
+go2 :: IO ()
+go2 = do
+  putStrLn "Monad transformers"
+  let ((r, log'), s) = runState (runWriterT runProc) ["Nothing interesting"]
+  putStrLn $ "Result: " ++ show r
+  putStrLn $ "Log: " ++ show log'
+  putStrLn $ "State: " ++ show s
 
 go :: IO ()
 go = do
