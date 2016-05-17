@@ -19,6 +19,7 @@ module Graph
 
 import Control.Lens
 import Control.Monad.State
+import Control.Monad.Writer
 import qualified Data.Map.Strict as Map
 import qualified Text.Show.Pretty as Pr
 import qualified Data.OrdPSQ as PQ
@@ -104,8 +105,8 @@ newtype StateRfq = StateRfq (Map.Map RfqId Rfq)
 newtype StateSldWnd = StateSldWnd (PQ.OrdPSQ RfqId Time ())
                     deriving (Show, Eq)
 
-newtype StateTime = StateTime Time
-                     deriving (Show, Eq)
+newtype StateTime = StateTime { unStateTime :: Time }
+                  deriving (Show, Eq)
 
 type StateParams = Params
 -------------------------------------------------------------------------------
@@ -137,7 +138,9 @@ initialState = RulesState { _sTime = StateTime 0
                           }
 
 
-runRule :: i -> (i -> s -> (o, s)) -> Lens' RulesState s -> State RulesState o
+runRule :: i -> (i -> s -> (o, s))
+        -> Lens' RulesState s
+        -> ProcMonad [IntCmd] RulesState o
 runRule inputs fS l = do
   st <- get
   let s = view l st
@@ -145,8 +148,13 @@ runRule inputs fS l = do
   put $ set l s' st
   return $ o
 
+type ProcMonad w s r = WriterT w (State s) r
 
-processTimerTick :: TimerTick -> State RulesState CbResult
+data IntCmd = IcDelRfq Time RfqId
+            deriving Show
+
+
+processTimerTick :: TimerTick -> ProcMonad [IntCmd] RulesState CbResult
 processTimerTick tick = do
   runRule tick updateTick sTime
     where
@@ -160,7 +168,7 @@ processTimerTick tick = do
                        , StateTime prevT)
 
 
-processParams :: Params -> State RulesState CbResult
+processParams :: Params -> ProcMonad [IntCmd] RulesState CbResult
 processParams params = do
   _ <- runRule params (\ps _ -> ((), ps)) sParams
   st <- get
@@ -171,10 +179,11 @@ processParams params = do
           calcSldWnd sSldWnd
 
 
-processRfq :: Rfq -> State RulesState CbResult
+processRfq :: Rfq -> ProcMonad [IntCmd] RulesState CbResult
 processRfq rfq = do
   rfqGcbs <- runRule rfq addRfq sRfq
   st <- get
+  tell [IcDelRfq ((unStateTime $ view sTime st) + 30) (view rfqId rfq)] -- FIXME: 30
   sldWndGcbs <- runRule (Just $ view rfqId rfq,
                          view sTime st,
                          view (sParams . sldWndTime) st,
@@ -215,7 +224,7 @@ pqDropWhile pred' pq = case PQ.findMin pq of
                     else pq
 
 
-processDelRfq :: RfqId -> State RulesState CbResult
+processDelRfq :: RfqId -> ProcMonad [IntCmd] RulesState CbResult
 processDelRfq rfqId' = do
   liftM concat $ sequence [ runRule rfqId' delRfq sRfq
                           , runRule rfqId' delRfq2 sSldWnd ]
@@ -227,14 +236,13 @@ processDelRfq rfqId' = do
 
 
 
-processRules :: InputMessage -> State RulesState [Cb]
+processRules :: InputMessage -> ProcMonad [IntCmd] RulesState CbResult
 processRules (ImTimer tt) = processTimerTick tt
 processRules (ImParams params) = processParams params
 processRules (ImRfq rfq) = processRfq rfq
 processRules (ImDelRfq rfqId') = processDelRfq rfqId'
 
 
--- inputData :: [(Maybe TimerTick, Maybe Params, Maybe Rfq)]
 inputData :: [InputMessage]
 inputData = [ ImTimer $ TimerTick 10
             , ImRfq $ makeRfq 1 RfqStateOpen 13 997
@@ -255,11 +263,22 @@ inputData = [ ImTimer $ TimerTick 10
 initialOutput :: CbResult
 initialOutput = []
 
+initialCmds :: [IntCmd]
+initialCmds = []
 
 go :: IO ()
 go = do
   putStrLn $ "Initial state: [" ++ show initialState ++ "]"
-  let allRes = scanl (\(_, st) inputs -> runState (processRules inputs) st)
-                     (initialOutput, initialState) inputData
+  let allRes = scanl (\((_, cmds), st) inputs ->
+                       runState (runWriterT $ processRules inputs) st)
+                      ((initialOutput, initialCmds), initialState) inputData
   putStrLn $ "Result after all steps:"
   putStrLn $ Pr.ppShow allRes
+
+
+newtype IntCmdQueueKey = IcqKey Int -- make it unique
+type IntCmdQueue = PQ.OrdPSQ IntCmdQueueKey Time ()
+
+
+runProc :: InputMessage -> RulesState -> [((CbResult, [IntCmd]), RulesState)]
+runProc msg st = undefined

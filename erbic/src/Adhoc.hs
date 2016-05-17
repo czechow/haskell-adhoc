@@ -26,9 +26,11 @@ pqDropWhile pred' pq = case PQ.findMin pq of
                     then pqDropWhile pred' $ PQ.deleteMin pq
                     else pq
 
+type MyMonad a b c = WriterT a (State b) c
 
-runProc :: WriterT [Int] (State [String]) Int
-runProc = do
+
+runProc :: Int -> WriterT [Int] (State [String]) Int
+runProc _ = do
   st <- get
   put $ "Something here" : st
   tell [997]
@@ -38,7 +40,7 @@ runProc = do
 go2 :: IO ()
 go2 = do
   putStrLn "Monad transformers"
-  let ((r, log'), s) = runState (runWriterT runProc) ["Nothing interesting"]
+  let ((r, log'), s) = runState (runWriterT $ runProc 13) ["Nothing interesting"]
   putStrLn $ "Result: " ++ show r
   putStrLn $ "Log: " ++ show log'
   putStrLn $ "State: " ++ show s
