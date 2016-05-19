@@ -276,9 +276,28 @@ go = do
   putStrLn $ Pr.ppShow allRes
 
 
-newtype IntCmdQueueKey = IcqKey Int -- make it unique
+data IntCmdQueueKey = IcqkDelRfq RfqId
+                    | IcqkDummy Int
+                    deriving (Show, Eq, Ord)
 type IntCmdQueue = PQ.OrdPSQ IntCmdQueueKey Time ()
 
 
-runProc :: InputMessage -> RulesState -> [((CbResult, [IntCmd]), RulesState)]
-runProc msg st = undefined
+-- FIXME: too complex, refactor
+runProc :: InputMessage -> RulesState -> IntCmdQueue
+        -> [((CbResult, IntCmdQueue), RulesState)]
+runProc msg st queue = case PQ.findMin queue of
+  Nothing -> [runComp msg st queue]
+  Just (k, t, _) -> if t <= (unStateTime $ view sTime st)
+                    then let a@((cbres1, queue'), st') = runComp (toMsg k) st (PQ.deleteMin queue)
+                         in  a : runProc msg st' queue'
+                    else [runComp msg st queue]
+  where
+    runComp msg' st' queue' =
+      let ((o, cmds), st'') = runState (runWriterT $ processRules msg') st'
+             -- FIXME: what if we want to check/serve the queue immediately (?)
+             in ((o, addCmds cmds queue'), st'')
+    addCmds cs queue' = foldl (\q' c ->
+                                uncurry3 PQ.insert (toQItem c) q') queue' cs
+    toQItem (IcDelRfq t rfqId') = (IcqkDelRfq rfqId', t, ())
+    toMsg = undefined -- FIXME
+    uncurry3 f (x, y, z) = f x y z

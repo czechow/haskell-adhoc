@@ -49,3 +49,11 @@ go :: IO ()
 go = do
   putStrLn "Up and running in PSQ"
   putStrLn $ "Priority queue: " ++ show q3
+
+uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
+uncurry3 f (x, y, z) = f x y z
+
+go3 :: IO ()
+go3 = do
+  let res = uncurry3 PQ.insert (1, 2, 3) (PQ.empty :: PQ.OrdPSQ Int Int Int)
+  putStrLn $ "Res is " ++ show res
