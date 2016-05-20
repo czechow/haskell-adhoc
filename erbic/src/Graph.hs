@@ -288,8 +288,9 @@ runProc :: InputMessage -> RulesState -> IntCmdQueue
 runProc msg st queue = case PQ.findMin queue of
   Nothing -> [runComp msg st queue]
   Just (k, t, _) -> if t <= (unStateTime $ view sTime st)
-                    then let a@((cbres1, queue'), st') = runComp (toMsg k) st (PQ.deleteMin queue)
-                         in  a : runProc msg st' queue'
+                    then let a@((cbres1, queue'), st') =
+                               runComp (toMsg k) st (PQ.deleteMin queue)
+                         in a : runProc msg st' queue' -- FIXME: lost cbres1
                     else [runComp msg st queue]
   where
     runComp msg' st' queue' =
@@ -299,5 +300,5 @@ runProc msg st queue = case PQ.findMin queue of
     addCmds cs queue' = foldl (\q' c ->
                                 uncurry3 PQ.insert (toQItem c) q') queue' cs
     toQItem (IcDelRfq t rfqId') = (IcqkDelRfq rfqId', t, ())
-    toMsg = undefined -- FIXME
+    toMsg = undefined -- FIXME:
     uncurry3 f (x, y, z) = f x y z
