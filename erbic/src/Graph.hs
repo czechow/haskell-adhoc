@@ -287,10 +287,10 @@ runProc :: InputMessage -> RulesState -> IntCmdQueue
         -> [((CbResult, IntCmdQueue), RulesState)]
 runProc msg st queue = case PQ.findMin queue of
   Nothing -> [runComp msg st queue]
-  Just (k, t, _) -> if t <= (unStateTime $ view sTime st)
-                    then let a@((cbres1, queue'), st') =
-                               runComp (toMsg k) st (PQ.deleteMin queue)
-                         in a : runProc msg st' queue' -- FIXME: lost cbres1
+  Just (k, t, v) -> if t <= (unStateTime $ view sTime st)
+                    then let a@((_, queue'), st') =
+                               runComp (toMsg k v) st (PQ.deleteMin queue)
+                         in a : runProc msg st' queue'
                     else [runComp msg st queue]
   where
     runComp msg' st' queue' =
@@ -300,5 +300,6 @@ runProc msg st queue = case PQ.findMin queue of
     addCmds cs queue' = foldl (\q' c ->
                                 uncurry3 PQ.insert (toQItem c) q') queue' cs
     toQItem (IcDelRfq t rfqId') = (IcqkDelRfq rfqId', t, ())
-    toMsg = undefined -- FIXME:
+    toMsg (IcqkDelRfq rfqId') _ = ImDelRfq rfqId'
+    toMsg (IcqkDummy _) _ = error "Unable to handle IcqkDummy message"
     uncurry3 f (x, y, z) = f x y z
