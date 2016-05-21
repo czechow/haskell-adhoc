@@ -281,8 +281,24 @@ data IntCmdQueueKey = IcqkDelRfq RfqId
                     deriving (Show, Eq, Ord)
 type IntCmdQueue = PQ.OrdPSQ IntCmdQueueKey Time ()
 
+type GcQueue = PQ.OrdPSQ RfqId Time ()
 
+runComp :: InputMessage -> RulesState -> ((CbResult, [IntCmd]), RulesState)
+runComp msg st = runState (runWriterT $ processRules msg) st
+
+dispatchGcCmds :: [IntCmd] -> GcQueue -> GcQueue
+dispatchGcCmds cs queue = foldl (\q c -> case c of
+                                  (IcDelRfq t rfqId') -> PQ.insert rfqId' t () q
+                                  ) queue cs
+
+
+--dispatchCb :: CbResult -> IO ()
+
+
+
+-- testable interface
 -- FIXME: too complex, refactor
+
 runProc :: InputMessage -> RulesState -> IntCmdQueue
         -> [((CbResult, IntCmdQueue), RulesState)]
 runProc msg st queue = case PQ.findMin queue of
