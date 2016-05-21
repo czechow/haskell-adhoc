@@ -265,7 +265,8 @@ inputData = [ ImTimer $ TimerTick 10
             , ImParams $ makeParams 15 3
             , ImParams $ makeParams 15 1
             , ImTimer $ TimerTick 34
-            , ImDelRfq $ RfqId 4
+            , ImTimer $ TimerTick 60
+            , ImTimer $ TimerTick 100
             ]
 
 
@@ -278,72 +279,57 @@ initialCmds = []
 go :: IO ()
 go = do
   putStrLn $ "Initial state: [" ++ show initialState ++ "]"
-  let allRes = scanl (\((_, cmds), st) inputs ->
-                       runState (runWriterT $ processRules inputs) st)
-                      ((initialOutput, initialCmds), initialState) inputData
+  let allRes = scanl (\(_, _, st) inputs -> runComp inputs st)
+                      (initialOutput, initialCmds, initialState) inputData
   putStrLn $ "Result after all steps:"
   putStrLn $ Pr.ppShow allRes
 
 
-data IntCmdQueueKey = IcqkDelRfq RfqId
-                    | IcqkDummy Int
-                    deriving (Show, Eq, Ord)
-type IntCmdQueue = PQ.OrdPSQ IntCmdQueueKey Time ()
+go2 :: IO ()
+go2 = do
+  putStrLn $ "Initial state: [" ++ show initialState ++ "]"
+  putStrLn $ "Result after all steps:"
+  putStrLn $ Pr.ppShow $ runTestLoop inputData initialState PQ.empty
+
+
 
 type GcQueue = PQ.OrdPSQ RfqId Time ()
 
-runComp :: InputMessage -> RulesState -> ((CbResult, [IntCmd]), RulesState)
-runComp msg st = runState (runWriterT $ processRules msg) st
+runComp :: InputMessage -> RulesState -> (CbResult, [IntCmd], RulesState)
+runComp msg st =
+  let ((cbs, cmds), st') = runState (runWriterT $ processRules msg) st
+  in (cbs, cmds, st')
 
-dispatchGcCmds :: [IntCmd] -> GcQueue -> GcQueue
-dispatchGcCmds cs queue = foldl (\q c -> case c of
-                                  (IcDelRfq t rfqId') -> PQ.insert rfqId' t () q
-                                ) queue cs
+addToGcQueue :: [IntCmd] -> GcQueue -> GcQueue
+addToGcQueue cs queue = foldl (\q c -> case c of
+                                (IcDelRfq t rfqId') -> PQ.insert rfqId' t () q
+                              ) queue cs
 
 dispatchCbResult :: CbResult -> IO ()
 dispatchCbResult = undefined
 
--- Simplified version: we only run GC on timer events...
-runTestLoop :: [InputMessage]
-            -> RulesState
-            -> GcQueue
-            -> [(CbResult, GcQueue, RulesState)]
-runTestLoop [] st gcQueue = case PQ.findMin gcQueue of
-  Nothing -> []
-  Just m -> runTestLoop [((ImDelRfq . view _1) m)] st $ PQ.deleteMin gcQueue
-runTestLoop (m@(ImTimer (TimerTick t)) : ms) st gcQueue =
-  let ((cbs, icmds), st') = runComp m st
-      gcQueue' = dispatchGcCmds icmds gcQueue
-      (gcMsgs, gcQueue'') = (,) <$> pqTakeWhile (\_ p _ -> p <= t)
-                                <*> pqDropWhile (\_ p _ -> p <= t)
-                                $   gcQueue'
-      newGcMsgs = map (ImDelRfq . view _1) gcMsgs
-  in (cbs, gcQueue', st') : (runTestLoop (newGcMsgs ++ ms) st' gcQueue'')
-runTestLoop (m : ms) st gcQueue =
-  let ((cbs, gcQueue'), st') =
-        over (_1 . _2) (flip dispatchGcCmds gcQueue) $ runComp m st
-  in (cbs, gcQueue', st') : (runTestLoop ms st' gcQueue')
+data StepResult = StepResult { inputMessage :: Maybe InputMessage
+                             , cbResult :: CbResult
+                             , gcQueue :: GcQueue
+                             , rulesState :: RulesState
+                             }
+                deriving Show
 
--- testable interface
--- FIXME: too complex, refactor
+mkStepResult :: Maybe InputMessage
+             -> (CbResult, GcQueue, RulesState)
+             -> StepResult
+mkStepResult mim (cbs, gcQ, st) = StepResult mim cbs gcQ st
 
-runProc :: InputMessage -> RulesState -> IntCmdQueue
-        -> [((CbResult, IntCmdQueue), RulesState)]
-runProc msg st queue = case PQ.findMin queue of
-  Nothing -> [runComp msg st queue]
-  Just (k, t, v) -> if t <= (unStateTime $ view sTime st)
-                    then let a@((_, queue'), st') =
-                               runComp (toMsg k v) st (PQ.deleteMin queue)
-                         in a : runProc msg st' queue'
-                    else [runComp msg st queue]
+
+runTestLoop :: [InputMessage] -> RulesState -> GcQueue -> [StepResult]
+runTestLoop [] st gcQ = [mkStepResult Nothing ([], gcQ, st)]
+runTestLoop (m : ms) st gcQ =
+  let r@(_, gcQ', st') = over _2 (flip addToGcQueue gcQ) $ runComp m st
+  in case PQ.findMin gcQ' >>= shouldGc (unStateTime $ view sTime st') of
+    Nothing -> mkStepResult (Just m) r : runTestLoop ms st' gcQ'
+    Just m' -> mkStepResult (Just m) r : runTestLoop (m' : ms) st'
+                                                     (PQ.deleteMin gcQ')
   where
-    runComp msg' st' queue' =
-      let ((o, cmds), st'') = runState (runWriterT $ processRules msg') st'
-             -- FIXME: what if we want to check/serve the queue immediately (?)
-             in ((o, addCmds cmds queue'), st'')
-    addCmds cs queue' = foldl (\q' c ->
-                                uncurry3 PQ.insert (toQItem c) q') queue' cs
-    toQItem (IcDelRfq t rfqId') = (IcqkDelRfq rfqId', t, ())
-    toMsg (IcqkDelRfq rfqId') _ = ImDelRfq rfqId'
-    toMsg (IcqkDummy _) _ = error "Unable to handle IcqkDummy message"
-    uncurry3 f (x, y, z) = f x y z
+    shouldGc ct (rfqId', t, _) =  if t <= ct
+                                  then Just $ ImDelRfq rfqId'
+                                  else Nothing
