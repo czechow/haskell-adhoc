@@ -223,6 +223,15 @@ pqDropWhile pred' pq = case PQ.findMin pq of
                     then pqDropWhile pred' $ PQ.deleteMin pq
                     else pq
 
+pqTakeWhile :: (Ord k, Ord p) => (k -> p -> v -> Bool)
+            -> PQ.OrdPSQ k p v
+            -> [(k, p, v)]
+pqTakeWhile pred' pq = case PQ.findMin pq of
+  Nothing -> []
+  Just e@(k, p, v) -> if (pred' k p v)
+                      then e : pqTakeWhile pred' (PQ.deleteMin pq)
+                      else []
+
 
 processDelRfq :: RfqId -> ProcMonad [IntCmd] RulesState CbResult
 processDelRfq rfqId' = do
@@ -289,12 +298,31 @@ runComp msg st = runState (runWriterT $ processRules msg) st
 dispatchGcCmds :: [IntCmd] -> GcQueue -> GcQueue
 dispatchGcCmds cs queue = foldl (\q c -> case c of
                                   (IcDelRfq t rfqId') -> PQ.insert rfqId' t () q
-                                  ) queue cs
+                                ) queue cs
 
+dispatchCbResult :: CbResult -> IO ()
+dispatchCbResult = undefined
 
---dispatchCb :: CbResult -> IO ()
-
-
+-- Simplified version: we only run GC on timer events...
+runTestLoop :: [InputMessage]
+            -> RulesState
+            -> GcQueue
+            -> [(CbResult, GcQueue, RulesState)]
+runTestLoop [] st gcQueue = case PQ.findMin gcQueue of
+  Nothing -> []
+  Just m -> runTestLoop [((ImDelRfq . view _1) m)] st $ PQ.deleteMin gcQueue
+runTestLoop (m@(ImTimer (TimerTick t)) : ms) st gcQueue =
+  let ((cbs, icmds), st') = runComp m st
+      gcQueue' = dispatchGcCmds icmds gcQueue
+      (gcMsgs, gcQueue'') = (,) <$> pqTakeWhile (\_ p _ -> p <= t)
+                                <*> pqDropWhile (\_ p _ -> p <= t)
+                                $   gcQueue'
+      newGcMsgs = map (ImDelRfq . view _1) gcMsgs
+  in (cbs, gcQueue', st') : (runTestLoop (newGcMsgs ++ ms) st' gcQueue'')
+runTestLoop (m : ms) st gcQueue =
+  let ((cbs, gcQueue'), st') =
+        over (_1 . _2) (flip dispatchGcCmds gcQueue) $ runComp m st
+  in (cbs, gcQueue', st') : (runTestLoop ms st' gcQueue')
 
 -- testable interface
 -- FIXME: too complex, refactor
