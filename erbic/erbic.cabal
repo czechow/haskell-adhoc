@@ -17,11 +17,13 @@ library
   hs-source-dirs:      src
   exposed-modules:     Graph
                      , Adhoc
+                     , Httpd
   build-depends:       base >= 4.7 && < 5
                      , lens
                      , mtl
                      , containers
                      , psqueues
+                     , network
                      , pretty-show                     
   default-language:    Haskell2010
 
