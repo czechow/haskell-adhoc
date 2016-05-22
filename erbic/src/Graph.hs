@@ -181,15 +181,15 @@ processParams params = do
 
 processRfq :: Rfq -> ProcMonad [IntCmd] RulesState CbResult
 processRfq rfq = do
-  rfqGcbs <- runRule rfq addRfq sRfq
+  rfqCbs <- runRule rfq addRfq sRfq
   st <- get
   tell [IcDelRfq ((unStateTime $ view sTime st) + 30) (view rfqId rfq)] -- FIXME: 30
-  sldWndGcbs <- runRule (Just $ view rfqId rfq,
+  sldWndCbs <- runRule (Just $ view rfqId rfq,
                          view sTime st,
                          view (sParams . sldWndTime) st,
                          view (sParams . sldWndCnt) st)
                         calcSldWnd sSldWnd
-  return $ rfqGcbs ++ sldWndGcbs
+  return $ rfqCbs ++ sldWndCbs
 
 
 addRfq :: Rfq -> StateRfq -> ([Cb], StateRfq)
