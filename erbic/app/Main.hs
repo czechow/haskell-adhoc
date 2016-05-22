@@ -10,7 +10,7 @@ import Data.Typeable
 import Data.Data
 import Control.Monad.State
 
-import Graph
+import Httpd
 
 
 data RFQ = RFQ Int String -- and many more...
@@ -137,4 +137,4 @@ fAll (i1, t1) (ps1, ps3) =
 main :: IO ()
 main = do
   putStrLn "Up and running"
-  Graph.go
+  Httpd.run
