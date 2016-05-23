@@ -3,7 +3,7 @@ module Httpd where
 import Network.Socket
 import Control.Concurrent
 import System.IO
-
+import System.Timeout
 
 msg :: String
 msg = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nPong!\r\n"
@@ -56,10 +56,20 @@ run = do
 
 accLoop :: Socket -> IO ()
 accLoop s = do
-  (s', _) <- accept s
-  --putStrLn "Connection accepted"
-  _ <- forkIO $ serveConn s'
-  accLoop s
+  mr <- timeout 1000000 (accept s)
+  case mr of
+    Just (s', _) -> do
+      putStrLn "Connection accepted"
+      _ <- forkIO $ serveConn s'
+      accLoop s
+    Nothing -> do
+      putStrLn "Connection accept timed out, retrying"
+      accLoop s
+
+  -- (s', _) <- accept s
+  -- --putStrLn "Connection accepted"
+  -- _ <- forkIO $ serveConn s'
+  -- accLoop s
 
 serveConn :: Socket -> IO ()
 serveConn s = do
