@@ -40,6 +40,9 @@ myRead = do
             rd (i + length (read line :: [MyData])) h'
 
 
+data StopReq = StopReq { shouldStop :: Bool
+                       , stopped :: MVar Bool }
+
 run :: IO ()
 run = do
   s <- socket AF_INET Stream defaultProtocol
@@ -48,23 +51,35 @@ run = do
   listen s 5
 
   putStrLn "Waiting for connections. Hit <Enter> to stop"
-  _ <- forkIO $ accLoop s
+  mvStopReq <- newStopReq
+  _ <- forkIO $ accLoop s mvStopReq
   _ <- getLine
-  putStrLn "Finishing main thread"
+  putStrLn "Signaling accept thread to finish"
+  modifyMVar_ mvStopReq $ \(StopReq _ x) -> return $ StopReq True x
+  stopReq <- readMVar mvStopReq
+  _ <- takeMVar $ stopped stopReq
+  putStrLn "Accept thread finished"
   close s
-  threadDelay 1000000
 
-accLoop :: Socket -> IO ()
-accLoop s = do
-  mr <- timeout 1000000 (accept s)
+newStopReq :: IO (MVar StopReq)
+newStopReq = do
+  stopped' <- newEmptyMVar
+  newMVar $ StopReq False stopped'
+
+accLoop :: Socket -> MVar StopReq -> IO ()
+accLoop s mvStopReq = do
+  mr <- timeout 3000000 (accept s)
   case mr of
     Just (s', _) -> do
       putStrLn "Connection accepted"
       _ <- forkIO $ serveConn s'
-      accLoop s
+      accLoop s mvStopReq
     Nothing -> do
-      putStrLn "Connection accept timed out, retrying"
-      accLoop s
+      putStrLn "Checking if we need to stop..."
+      stopReq <- readMVar mvStopReq
+      if shouldStop stopReq
+        then putMVar (stopped stopReq) True
+        else accLoop s mvStopReq
 
   -- (s', _) <- accept s
   -- --putStrLn "Connection accepted"
