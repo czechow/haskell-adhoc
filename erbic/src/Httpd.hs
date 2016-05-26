@@ -40,8 +40,7 @@ myRead = do
             rd (i + length (read line :: [MyData])) h'
 
 
-data StopReq = StopReq { shouldStop :: Bool
-                       , stopped :: MVar Bool }
+newtype StopReq = StopReq { stopped :: MVar Bool }
 
 run :: IO ()
 run = do
@@ -51,20 +50,17 @@ run = do
   listen s 5
 
   putStrLn "Waiting for connections. Hit <Enter> to stop"
-  mvStopReq <- newStopReq
+  mvStopReq <- newEmptyMVar
   _ <- forkIO $ accLoop s mvStopReq
   _ <- getLine
   putStrLn "Signaling accept thread to finish"
-  modifyMVar_ mvStopReq $ \(StopReq _ x) -> return $ StopReq True x
-  stopReq <- readMVar mvStopReq
-  _ <- takeMVar $ stopped stopReq
+  stopReq <- newEmptyMVar
+  putMVar mvStopReq $ StopReq stopReq
+  stopReq' <- readMVar mvStopReq
+  _ <- takeMVar $ stopped stopReq'
   putStrLn "Accept thread finished"
   close s
 
-newStopReq :: IO (MVar StopReq)
-newStopReq = do
-  stopped' <- newEmptyMVar
-  newMVar $ StopReq False stopped'
 
 accLoop :: Socket -> MVar StopReq -> IO ()
 accLoop s mvStopReq = do
@@ -76,10 +72,14 @@ accLoop s mvStopReq = do
       accLoop s mvStopReq
     Nothing -> do
       putStrLn "Checking if we need to stop..."
-      stopReq <- readMVar mvStopReq
-      if shouldStop stopReq
-        then putMVar (stopped stopReq) True
-        else accLoop s mvStopReq
+      mStopReq <- tryTakeMVar mvStopReq
+      putStrLn "Maybe mVar taken"
+      case mStopReq of
+        Nothing -> accLoop s mvStopReq
+        Just stopReq -> do
+          putStrLn "Acc thrd tries to signal stop"
+          putMVar (stopped stopReq) True
+          putMVar mvStopReq stopReq
 
   -- (s', _) <- accept s
   -- --putStrLn "Connection accepted"
