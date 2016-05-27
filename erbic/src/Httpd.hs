@@ -43,6 +43,7 @@ myRead = do
 run :: IO ()
 run = do
   s <- socket AF_INET Stream defaultProtocol
+  setSocketOption s ReuseAddr 1
   hostAddr <- inet_addr "127.0.0.1"
   bind s (SockAddrInet 2222 hostAddr)
   listen s 5
@@ -56,6 +57,7 @@ run = do
   putMVar mvStopReq stopReqCallback
   mapM_ takeMVar [stopReqCallback]
   putStrLn "Accept thread finished"
+  shutdown s ShutdownBoth
   close s
 
 
@@ -68,22 +70,37 @@ accLoop s mvStopReq = do
       _ <- forkIO $ serveConn s'
       accLoop s mvStopReq
     Nothing -> do
-      putStrLn "Checking if we need to stop..."
+      -- putStrLn "Checking if we need to stop..."
       tryTakeMVar mvStopReq >>= stopOrLoop []
   where
     stopOrLoop _ (Just stopReq) = putMVar stopReq ()
     stopOrLoop _ Nothing = accLoop s mvStopReq
 
 
-  -- (s', _) <- accept s
-  -- --putStrLn "Connection accepted"
-  -- _ <- forkIO $ serveConn s'
-  -- accLoop s
 
 serveConn :: Socket -> IO ()
 serveConn s = do
-  _ <- send s msg
+  _ <- send s "100: HELLO\n"
+  loop
+    where
+      loop = recvLen s 1024 >>= sanitize >>= dispatch
+      sanitize a@(_, 0) = return a
+      sanitize a@(input, ln) = case reverse input of
+        ('\n' : '\r' : xs) -> return (reverse xs, ln)
+        _ -> return a
+      dispatch (_, 0) =
+        putStrLn "Other party closed connection" >>
+        shutdown s ShutdownBoth >>
+        close s
+      dispatch ("CLOSE", _) =
+        putStrLn "Close command received, closing channel" >>
+        shutdown s ShutdownBoth >>
+        close s
+      dispatch (cmd, _) =
+        send s ("500: Unknown command received [" ++ cmd ++ "]\r\n") >>
+        loop
+
+
   --putStrLn $ show len ++ " bytes sent"
-  close s
 
 -- socket :: Family -> SocketType -> ProtocolNumber -> IO Socket
