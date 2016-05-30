@@ -50,7 +50,7 @@ run = do
 
   putStrLn "Waiting for connections. Hit <Enter> to stop"
   mvStopReq <- newEmptyMVar
-  _ <- forkIO $ accLoop s mvStopReq
+  _ <- forkIO $ accLoop s [] mvStopReq
   _ <- getLine
   putStrLn "Signaling accept thread to finish"
   stopReqCallback <- newEmptyMVar
@@ -60,47 +60,60 @@ run = do
   shutdown s ShutdownBoth
   close s
 
-
-accLoop :: Socket -> MVar (MVar ()) -> IO ()
-accLoop s mvStopReq = do
+-- FIXME: No filtering of finished threads so far
+accLoop :: Socket -> [(MVar (), MVar ())] -> MVar (MVar ()) -> IO ()
+accLoop s connsComm mvStopReq = do
   mr <- timeout 1000000 (accept s)
   case mr of
     Just (s', _) -> do
       putStrLn "Connection accepted"
-      _ <- forkIO $ serveConn s'
-      accLoop s mvStopReq
-    Nothing -> do
-      -- putStrLn "Checking if we need to stop..."
+      mvThrStopReq <- newEmptyMVar
+      mvThrStopped <- newEmptyMVar
+      _ <- forkIO $ serveConn s' mvThrStopReq mvThrStopped
+      accLoop s ((mvThrStopReq, mvThrStopped) : connsComm) mvStopReq
+    Nothing ->
       tryTakeMVar mvStopReq >>= stopOrLoop []
   where
-    stopOrLoop _ (Just stopReq) = putMVar stopReq ()
-    stopOrLoop _ Nothing = accLoop s mvStopReq
+    stopOrLoop _ Nothing = accLoop s connsComm mvStopReq
+    stopOrLoop _ (Just stopReq) =
+      stopAllConns >>
+      putMVar stopReq ()
+    stopAllConns =
+      putStrLn ("Stopping " ++ (show $ length connsComm) ++ " connections") >>
+      mapM_ (\(mvStopRq, _) -> putMVar mvStopRq ()) connsComm >>
+      mapM_ (\(_, mvFinished) -> takeMVar mvFinished) connsComm
 
 
 
-serveConn :: Socket -> IO ()
-serveConn s = do
+
+serveConn :: Socket -> MVar () -> MVar () -> IO ()
+serveConn s mvStopReq mvFinished = do
   _ <- send s "100: HELLO\n"
   loop
     where
-      loop = recvLen s 1024 >>= sanitize >>= dispatch
+      loop = timeout 1000000 (recvLen s 1024) >>= processOrTerminate
+      processOrTerminate maybeMsg =
+        tryTakeMVar mvStopReq >>= \stopReq -> case stopReq of
+          Nothing -> case maybeMsg of
+            Just msg' -> return msg' >>= sanitize >>= dispatch
+            Nothing -> loop -- timed out, ok to loop again
+          Just _ ->
+            putStrLn "Thread termination request received" >>
+            finish
       sanitize a@(_, 0) = return a
       sanitize a@(input, ln) = case reverse input of
         ('\n' : '\r' : xs) -> return (reverse xs, ln)
         _ -> return a
       dispatch (_, 0) =
         putStrLn "Other party closed connection" >>
-        shutdown s ShutdownBoth >>
-        close s
+        finish
       dispatch ("CLOSE", _) =
         putStrLn "Close command received, closing channel" >>
-        shutdown s ShutdownBoth >>
-        close s
+        finish
       dispatch (cmd, _) =
         send s ("500: Unknown command received [" ++ cmd ++ "]\r\n") >>
         loop
-
-
-  --putStrLn $ show len ++ " bytes sent"
-
--- socket :: Family -> SocketType -> ProtocolNumber -> IO Socket
+      finish =
+        shutdown s ShutdownBoth >>
+        close s >>
+        putMVar mvFinished ()
