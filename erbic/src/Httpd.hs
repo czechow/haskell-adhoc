@@ -4,6 +4,7 @@ import Network.Socket
 import Control.Concurrent
 import System.IO
 import System.Timeout
+import Control.Monad
 
 msg :: String
 msg = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nPong!\r\n"
@@ -60,7 +61,7 @@ run = do
   shutdown s ShutdownBoth
   close s
 
--- FIXME: No filtering of finished threads so far
+
 accLoop :: Socket -> [(MVar (), MVar ())] -> MVar (MVar ()) -> IO ()
 accLoop s connsComm mvStopReq = do
   mr <- timeout 1000000 (accept s)
@@ -74,7 +75,14 @@ accLoop s connsComm mvStopReq = do
     Nothing ->
       tryTakeMVar mvStopReq >>= stopOrLoop []
   where
-    stopOrLoop _ Nothing = accLoop s connsComm mvStopReq
+    stopOrLoop _ Nothing = do
+      connsComm' <- filterM (isEmptyMVar . snd) connsComm
+      if (connsComm' /= connsComm)
+        then putStrLn $ "Dropped " ++
+                        show (length connsComm - length connsComm') ++
+                        " connections"
+        else return ()
+      accLoop s connsComm' mvStopReq
     stopOrLoop _ (Just stopReq) =
       stopAllConns >>
       putMVar stopReq ()
