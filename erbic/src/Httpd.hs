@@ -53,7 +53,7 @@ run = do
 
   putStrLn "Waiting for connections. Hit <Enter> to stop"
   mvStopReq <- newEmptyMVar
-  _ <- forkIO $ accLoop s [] mvStopReq
+  _ <- forkIO $ accLoop s mvStopReq
   _ <- getLine
   putStrLn "Signaling accept thread to finish"
   stopReqCallback <- newEmptyMVar
@@ -65,35 +65,37 @@ run = do
 data StopInfo = SI { stopReq :: MVar ()
                    , finished :: MVar () }
 
-accLoop :: Socket -> [StopInfo] -> MVar (MVar ()) -> IO ()
-accLoop s connsComm mvStopReq = do
-  mr <- timeout 1000000 (accept s) -- FIXME: can accept throw an exception?
-  case mr of
-    Just (s', _) -> do
-      putStrLn "Connection accepted"
-      mvThrStopReq <- newEmptyMVar
-      mvThrStopped <- newEmptyMVar
-      _ <- forkIO $ serveConn s' $ SI mvThrStopReq mvThrStopped
-      accLoop s (SI mvThrStopReq mvThrStopped : connsComm) mvStopReq
-    Nothing ->
-      tryTakeMVar mvStopReq >>= stopOrLoop []
+accLoop :: Socket -> MVar (MVar ()) -> IO ()
+accLoop s' mvSR' = accLoop' s' [] mvSR'
   where
-    stopOrLoop _ Nothing = do
-      connsComm' <- filterM (isEmptyMVar . finished) connsComm
-      if (length connsComm' /= length connsComm)
-        then putStrLn $ "Dropped " ++
-                        show (length connsComm - length connsComm') ++
-                        " connections"
-        else return ()
-      accLoop s connsComm' mvStopReq
-    stopOrLoop _ (Just stopReq') =
-      stopAllConns >>
-      putMVar stopReq' ()
-    stopAllConns =
-      putStrLn ("Stopping " ++ (show $ length connsComm) ++ " connections") >>
-      mapM_ (flip putMVar () . stopReq) connsComm >>
-      mapM_ (takeMVar . finished) connsComm
-
+    accLoop' s connsComm mvStopReq = do
+      mr <- timeout 1000000 (accept s) -- FIXME: can accept throw an exception?
+      case mr of
+        Just (s'', _) -> do
+          putStrLn "Connection accepted"
+          mvThrStopReq <- newEmptyMVar
+          mvThrStopped <- newEmptyMVar
+          _ <- forkIO $ serveConn s'' $ SI mvThrStopReq mvThrStopped
+          accLoop' s (SI mvThrStopReq mvThrStopped : connsComm) mvStopReq
+        Nothing ->
+          tryTakeMVar mvStopReq >>= stopOrLoop []
+          where
+            stopOrLoop _ Nothing = do
+              connsComm' <- filterM (isEmptyMVar . finished) connsComm
+              if (length connsComm' /= length connsComm)
+                then putStrLn $ "Dropped " ++
+                     show (length connsComm - length connsComm') ++
+                     " connections"
+                else return ()
+              accLoop' s connsComm' mvStopReq
+            stopOrLoop _ (Just stopReq') =
+              stopAllConns >>
+              putMVar stopReq' ()
+            stopAllConns =
+              putStrLn ("Stopping " ++ (show $ length connsComm) ++
+                        " connections") >>
+              mapM_ (flip putMVar () . stopReq) connsComm >>
+              mapM_ (takeMVar . finished) connsComm
 
 
 type Code = Int
