@@ -60,7 +60,6 @@ run = do
   putMVar mvStopReq stopReqCallback
   mapM_ takeMVar [stopReqCallback]
   putStrLn "Accept thread finished"
-  shutdown s ShutdownBoth
   close s
 
 data StopInfo = SI { stopReq :: MVar ()
@@ -68,7 +67,7 @@ data StopInfo = SI { stopReq :: MVar ()
 
 accLoop :: Socket -> [StopInfo] -> MVar (MVar ()) -> IO ()
 accLoop s connsComm mvStopReq = do
-  mr <- timeout 1000000 (accept s)
+  mr <- timeout 1000000 (accept s) -- FIXME: can accept throw an exception?
   case mr of
     Just (s', _) -> do
       putStrLn "Connection accepted"
@@ -97,17 +96,22 @@ accLoop s connsComm mvStopReq = do
 
 
 
--- FIXME: send may fail as well
+type Code = Int
+
+data ConnState = ConnClose String
+               | ConnLoop
+               | ConnMsg (Code, String)
+               deriving Show
+
 -- FIXME: reading until newline?
 serveConn :: Socket -> StopInfo -> IO ()
 serveConn s (SI mvStopReq mvFinished) = do
-  _ <- send s "100: HELLO\n"
+  _ <- try' (send s "100: HELLO\n")
   loop
     where
       loop = read' >>= shouldTerminate >>= process >>= loopOrStop
 
-      read' :: IO (Either SomeException (Maybe (String, Int)))
-      read' =  try (timeout 1000000 $ recvLen s 1024)
+      read' =  try' (timeout 1000000 $ recvLen s 1024)
 
       shouldTerminate (Left _) =
         return $ Left "Other party closed connection"
@@ -117,27 +121,35 @@ serveConn s (SI mvStopReq mvFinished) = do
          Just _ -> return $ Left "Thread termination request received"
          Nothing -> return $ Right x
 
-      process (Left x) = return $ Left x
+      process (Left x) = return $ ConnClose x
       process (Right (Just (msg', _))) = return $ processMsg $ map toUpper msg'
-      process (Right Nothing) = return $ Right Nothing
+      process (Right Nothing) = return ConnLoop
 
-      loopOrStop (Right (Just (code, msg'))) =
-        send s (show code ++ ": " ++ msg' ++ "\r\n") >>
+      loopOrStop (ConnMsg (code, msg')) =
+        try' (send s (show code ++ ": " ++ msg' ++ "\r\n")) >>
         loop
-      loopOrStop (Right Nothing) = loop
-      loopOrStop (Left errMsg) = putStrLn errMsg >>
-                                 shutdown s ShutdownBoth >>
+      loopOrStop ConnLoop = loop
+      loopOrStop (ConnClose errMsg) = putStrLn errMsg >>
+                                 try' (shutdown s ShutdownBoth) >>
                                  close s >>
                                  putMVar mvFinished ()
 
-type Code = Int
 
-processMsg :: String -> Either String (Maybe (Code, String))
-processMsg =  dispatch . sanitize
+processMsg :: String -> ConnState
+processMsg = dispatch . sanitize
   where
     sanitize input = case reverse input of
       ('\n' : '\r' : xs) -> reverse xs
       _ -> input
-    dispatch "CLOSE" = Left "Close command received, closing channel"
-    dispatch cmd =
-      Right $ Just (500, "Unknown command received [" ++ cmd ++ "]")
+    dispatch "CLOSE" = ConnClose "Close command received, closing channel"
+    dispatch cmd = ConnMsg (500, "Unknown command received [" ++ cmd ++ "]")
+
+
+try' :: IO a -> IO (Either SomeException a)
+try' op = do
+  res <- try op
+  case res of
+    Left e -> do
+      putStrLn $ "***Exception encountered: " ++ show e
+      return $ Left e
+    _ -> return res
