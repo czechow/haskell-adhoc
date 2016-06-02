@@ -52,45 +52,50 @@ run = do
   listen s 5
 
   putStrLn "Waiting for connections. Hit <Enter> to stop"
-  mvStopReq <- newEmptyMVar
-  _ <- forkIO $ accLoop s mvStopReq
+  stopInfo <- makeStopInfo
+  _ <- forkIO $ accLoop s stopInfo
   _ <- getLine
   putStrLn "Signaling accept thread to finish"
-  stopReqCallback <- newEmptyMVar
-  putMVar mvStopReq stopReqCallback
-  mapM_ takeMVar [stopReqCallback]
+  putMVar (stopReq stopInfo) ()
+  mapM_ takeMVar [finished stopInfo]
   putStrLn "Accept thread finished"
   close s
 
 data StopInfo = SI { stopReq :: MVar ()
                    , finished :: MVar () }
 
-accLoop :: Socket -> MVar (MVar ()) -> IO ()
-accLoop s' mvSR' = accLoop' s' [] mvSR'
+makeStopInfo :: IO StopInfo
+makeStopInfo = do
+  mvStopReq <- newEmptyMVar
+  mvStopped <- newEmptyMVar
+  return $ SI mvStopReq mvStopped
+
+accLoop :: Socket -> StopInfo -> IO ()
+accLoop s' stopInfo' = accLoop' s' [] stopInfo'
   where
-    accLoop' s connsComm mvStopReq = do
+    accLoop' s connsComm stopInfo = do
       mr <- timeout 1000000 (accept s) -- FIXME: can accept throw an exception?
       case mr of
         Just (s'', _) -> do
           putStrLn "Connection accepted"
-          mvThrStopReq <- newEmptyMVar
-          mvThrStopped <- newEmptyMVar
-          _ <- forkIO $ serveConn s'' $ SI mvThrStopReq mvThrStopped
-          accLoop' s (SI mvThrStopReq mvThrStopped : connsComm) mvStopReq
+          thrStopInfo <- makeStopInfo
+          _ <- forkIO $ serveConn s'' thrStopInfo
+          accLoop' s (thrStopInfo : connsComm) stopInfo
         Nothing ->
-          tryTakeMVar mvStopReq >>= stopOrLoop []
+          tryTakeMVar (stopReq stopInfo) >>= stopOrLoop
           where
-            stopOrLoop _ Nothing = do
+            stopOrLoop Nothing = do
               connsComm' <- filterM (isEmptyMVar . finished) connsComm
               if (length connsComm' /= length connsComm)
                 then putStrLn $ "Dropped " ++
                      show (length connsComm - length connsComm') ++
                      " connections"
                 else return ()
-              accLoop' s connsComm' mvStopReq
-            stopOrLoop _ (Just stopReq') =
+              accLoop' s connsComm' stopInfo
+            stopOrLoop (Just _) =
               stopAllConns >>
-              putMVar stopReq' ()
+              putMVar (finished stopInfo) ()
+
             stopAllConns =
               putStrLn ("Stopping " ++ (show $ length connsComm) ++
                         " connections") >>
@@ -115,8 +120,7 @@ serveConn s (SI mvStopReq mvFinished) = do
 
       read' =  try' (timeout 1000000 $ recvLen s 1024)
 
-      shouldTerminate (Left _) =
-        return $ Left "Other party closed connection"
+      shouldTerminate (Left _) = return $ Left "Other party closed connection"
       shouldTerminate (Right x) = do
        stopReq' <- tryTakeMVar mvStopReq
        case stopReq' of
