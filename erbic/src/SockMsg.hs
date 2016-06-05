@@ -31,49 +31,49 @@ recvLen s l mv = do
       Just d -> return $ Data d
       Nothing -> recvLen s l mv
 
-data ParseState = InPacket
-                | NoPacket
-                deriving (Show)
 
 -- Error|Warn|Result
 data SockMsg = SockMsg String
              | Close
 
 
-recvMsg :: NS.Socket -> String -> ParseState -> MVar () -> IO (SockMsg, String)
-recvMsg s buff ps mv = do
-  res <- recvLen s 16 mv
-  case res of
-    Data (d, _) -> do
-      let (mMsg, buff', infos) = readData (buff ++ d) ps []
-      log infos
-      case (mMsg, buff') of
-        (Just msg, buff'') -> return (SockMsg msg, buff'')
-        (Nothing, [])  -> recvMsg s [] NoPacket mv
-        (Nothing, buff'')  -> recvMsg s buff'' InPacket mv
-    _ -> return (Close, buff) -- FIXME: other states too
+recvMsg :: NS.Socket -> String -> MVar () -> IO (SockMsg, String)
+recvMsg s buff mv = do
+  let (msg, buff', infos) = readData buff []
+  log infos
+  case (msg, buff') of
+    (Msg m, buff'') -> return (SockMsg m, buff'')
+    (MsgPart mp, _) -> doRecv mp
+    (NoMsg, _) -> doRecv []
+  where
+    doRecv mp  = do
+      res <- recvLen s 16 mv
+      case res of
+        Data (d, _) -> recvMsg s (mp ++ d) mv
+        _ -> return (Close, []) -- FIXME: other states too, any buff info?
+
 
 log :: [String] -> IO ()
 log = mapM_ putStrLn
 
+data Msg = Msg String
+         | MsgPart String
+         | NoMsg
+         deriving (Show)
+
 -- FIXME: The following looks like a classical parser's job...
 -- FIXME: State & Writer monad here...
-readData :: String -> ParseState -> [String] -> (Maybe String, String, [String])
-readData [] NoPacket infos = (Nothing, [], infos)
-readData buff' NoPacket infos = case break (=='\n') buff' of
-  (dropped, ('\n' : newBuff')) ->
-    readData newBuff' InPacket (infos ++ ["Dropped " ++ show (length dropped)])
-  (dropped, newBuff') ->
-    readData newBuff' NoPacket (infos ++ ["Dropped " ++ show (length dropped)])
-readData buff' InPacket infos =
+readData :: String -> [String] -> (Msg, String, [String])
+readData [] infos = (NoMsg, [], infos)
+readData buff' infos =
   case break (=='\n') buff' of
     (msg, ('\n' : newBuff')) -> case sane msg of
-      Just m -> (Just m, newBuff', infos)
-      Nothing -> readData newBuff' InPacket
+      Just m -> (Msg m, newBuff', infos)
+      Nothing -> readData newBuff'
                  (infos ++ ["Msg too long: " ++ show (length msg)])
     (_, _) -> case sane buff' of
-      Just m -> (Nothing, m, infos)
-      Nothing -> (Nothing, [],
+      Just m -> (MsgPart m, [], infos)
+      Nothing -> (NoMsg, [],
                   (infos ++ ["Buffer too long: " ++ show (length buff')]))
   where
     sane m' = if length m' <= 20
