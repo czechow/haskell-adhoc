@@ -1,7 +1,7 @@
 module SockMsg where
 
 import Prelude hiding (log)
-import qualified Network.Socket as NS
+--import Network.Socket as NS
 import Control.Concurrent
 
 import Control.Concurrent
@@ -9,6 +9,14 @@ import System.IO
 import System.Timeout
 import Control.Monad
 import Control.Exception
+
+import Network.Socket
+import Control.Concurrent
+import System.IO
+import System.Timeout
+import Control.Monad
+import Control.Exception
+import Data.Char (toUpper)
 
 
 type Length = Int
@@ -19,9 +27,9 @@ data SockResult = Error String
                 deriving (Show)
 type ErrMsg = String
 
-recvLen :: NS.Socket -> Length -> MVar () -> IO SockResult
-recvLen s l mv = do
-  errOrData <- try' (timeout 1000000 $ NS.recvLen s l)
+recvLen' :: Socket -> Length -> MVar () -> IO SockResult
+recvLen' s l mv = do
+  errOrData <- try' (timeout 1000000 $ recvLen s l)
   case errOrData of -- can we somehow detect closing condition???
     Left e -> return $ Error $ show e
     Right maybeData -> tryReadMVar mv >>= shouldStop maybeData
@@ -29,7 +37,7 @@ recvLen s l mv = do
     shouldStop _ (Just _) = return $ Interrupted
     shouldStop md Nothing = case md of
       Just d -> return $ Data d
-      Nothing -> recvLen s l mv
+      Nothing -> recvLen' s l mv
 
 
 -- Error|Warn|Result
@@ -37,7 +45,7 @@ data SockMsg = SockMsg String
              | Close
 
 
-recvMsg :: NS.Socket -> String -> MVar () -> IO (SockMsg, String)
+recvMsg :: Socket -> String -> MVar () -> IO (SockMsg, String)
 recvMsg s buff mv = do
   let (msg, buff', infos) = readData buff []
   log infos
@@ -47,7 +55,7 @@ recvMsg s buff mv = do
     (NoMsg, _) -> doRecv []
   where
     doRecv mp  = do
-      res <- recvLen s 16 mv
+      res <- recvLen' s 16 mv
       case res of
         Data (d, _) -> recvMsg s (mp ++ d) mv
         _ -> return (Close, []) -- FIXME: other states too, any buff info?
@@ -89,3 +97,89 @@ try' op = do
       putStrLn $ "***Exception encountered: " ++ show e
       return $ Left e
     _ -> return res
+
+
+
+
+
+
+run :: IO ()
+run = do
+  s <- socket AF_INET Stream defaultProtocol
+  setSocketOption s ReuseAddr 1
+  hostAddr <- inet_addr "127.0.0.1"
+  bind s (SockAddrInet 2222 hostAddr)
+  listen s 5
+
+  putStrLn "Waiting for connections. Hit <Enter> to stop"
+  stopInfo <- makeStopInfo
+  _ <- forkIO $ accLoop s stopInfo
+  _ <- getLine
+  putStrLn "Signaling accept thread to finish"
+  putMVar (stopReq stopInfo) ()
+  mapM_ takeMVar [finished stopInfo]
+  putStrLn "Accept thread finished"
+  close s
+
+data StopInfo = SI { stopReq :: MVar ()
+                   , finished :: MVar () }
+
+makeStopInfo :: IO StopInfo
+makeStopInfo = do
+  mvStopReq <- newEmptyMVar
+  mvStopped <- newEmptyMVar
+  return $ SI mvStopReq mvStopped
+
+accLoop :: Socket -> StopInfo -> IO ()
+accLoop s' stopInfo' = accLoop' s' [] stopInfo'
+  where
+    accLoop' s connsComm stopInfo = do
+      mr <- timeout 1000000 (accept s) -- FIXME: can accept throw an exception?
+      case mr of
+        Just (s'', _) -> do
+          putStrLn "Connection accepted"
+          thrStopInfo <- makeStopInfo
+          _ <- forkIO $ serveConn s'' thrStopInfo
+          accLoop' s (thrStopInfo : connsComm) stopInfo
+        Nothing ->
+          tryTakeMVar (stopReq stopInfo) >>= stopOrLoop
+          where
+            stopOrLoop Nothing = do
+              connsComm' <- filterM (isEmptyMVar . finished) connsComm
+              if (length connsComm' /= length connsComm)
+                then putStrLn $ "Dropped " ++
+                     show (length connsComm - length connsComm') ++
+                     " connections"
+                else return ()
+              accLoop' s connsComm' stopInfo
+            stopOrLoop (Just _) =
+              stopAllConns >>
+              putMVar (finished stopInfo) ()
+
+            stopAllConns =
+              putStrLn ("Stopping " ++ (show $ length connsComm) ++
+                        " connections") >>
+              mapM_ (flip putMVar () . stopReq) connsComm >>
+              mapM_ (takeMVar . finished) connsComm
+
+
+type Code = Int
+
+data ConnState = ConnClose String
+               | ConnLoop
+               | ConnMsg (Code, String)
+               deriving Show
+
+serveConn :: Socket -> StopInfo -> IO ()
+serveConn s (SI mvStopReq mvFinished) = loop []
+    where
+      loop buff = do
+        res <- recvMsg s buff mvStopReq
+        case res of
+          (SockMsg m, buff') -> putStrLn ("Received msg: [" ++ m ++ "]") >>
+                                loop buff'
+          (Close, _) -> close s >>
+                        putMVar mvFinished ()
+
+
+--        recvMsg :: Socket -> String -> MVar () -> IO (SockMsg, String)
