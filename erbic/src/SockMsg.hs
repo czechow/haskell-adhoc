@@ -53,6 +53,7 @@ recvMsg s buff mv = do
     (Msg m, buff'') -> return (SockMsg m, buff'')
     (MsgPart mp, _) -> doRecv mp
     (NoMsg, _) -> doRecv []
+    (SyncLost, _) -> doRecv []
   where
     doRecv mp  = do
       res <- recvLen' s 16 mv
@@ -67,8 +68,12 @@ log = mapM_ putStrLn
 data Msg = Msg String
          | MsgPart String
          | NoMsg
+         | SyncLost
          deriving (Show)
 
+
+-- There is a bug: on truncating buffers, we should wait for
+-- a sync character (\n) to start new msg...
 -- FIXME: The following looks like a classical parser's job...
 -- FIXME: State & Writer monad here...
 readData :: String -> [String] -> (Msg, String, [String])
