@@ -1,5 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module MyFree where
 
@@ -64,7 +65,6 @@ data Interaction :: * -> * where
   Return :: a -> Interaction a
   Bind :: Interaction a -> (a -> Interaction b) -> Interaction b
 
-
 -- (>>=) :: m a -> (a -> m b) -> m b
 
 instance Functor Interaction where
@@ -89,4 +89,43 @@ run :: Interaction a -> IO a
 run (Say msg) = putStrLn msg
 run Ask = getLine
 run (Return x) = return x
-run (Bind ia fm) = run $ ia >>= \x -> fm x
+run (Bind ia fm) = run ia >>= \x -> run $ fm x
+
+
+prog2 :: Interaction ()
+prog2 = Bind
+        (Bind
+        (Bind (Say "What is your name?")
+              (\_ -> Ask))
+              (\name -> Say $ "Hello " ++ name))
+              (\_ -> Say "This is the end")
+
+simulate :: [String] -> Interaction a -> [String]
+simulate _ (Say msg) = [msg]
+simulate (s:ss) Ask = [s]
+simulate _ (Return _) = []
+simulate (s:ss) (Bind ia fm) = undefined
+
+prog2' :: Interaction ()
+prog2' = (Say "What is your name?")
+
+{-
+data Interaction' :: * -> * where
+  Return' :: a -> Interaction' a
+  Say' :: String -> (() -> Interaction' b) -> Interaction' b
+  Ask' :: (String -> Interaction' b) -> Interaction' b
+-}
+
+data Interaction' a = Return' a
+                    | Say' String (() -> Interaction' a)
+                    | Ask' (String -> Interaction' a)
+                    deriving (Functor)
+
+
+data Free f a where
+  Pure   :: a -> Free f a
+  Impure :: f (Free f a) -> Free f a
+
+eta :: Functor f => f a -> Free f a
+eta fa = Impure $ fmap Pure fa
+-- Free f fa
