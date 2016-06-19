@@ -42,11 +42,12 @@ openSock = open `catch` handler
             putStrLn $ "Acquired socket " ++ show s
             bind s (SockAddrInet 2222 hostAddr)
             listen s 5
-            threadDelay 3000000
+            threadDelay 5000000
             return $ Right s)
     handler :: SomeException -> IO (Either ErrMsg Socket)
     handler e = do
       putStrLn $ "Running e handler"
+      putStrLn $ "Exception is [" ++ show e ++ "]"
       return $ Left $ "*** Exception: " ++ show e
 
 
@@ -59,3 +60,13 @@ openSock = open `catch` handler
   s <- readFromSocket -- wrapped with either => no exceptions
 
 -}
+
+testAsyncExceptions :: IO ()
+testAsyncExceptions = do
+  nt <- forkIO $ do
+    _ <- openSock
+    return ()
+  threadDelay $ 2 * 1000 * 1000
+  putStrLn $ "Killing thread " ++ show nt
+  killThread nt
+  threadDelay $ 5 * 1000 * 1000
