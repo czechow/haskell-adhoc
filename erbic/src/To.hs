@@ -7,7 +7,7 @@ import Control.Concurrent
 import Control.Exception
 import Network.Socket
 import Control.Monad
-
+import GHC.IO.Exception
 
 longFileRead :: Handle -> IO String
 longFileRead h = do
@@ -44,12 +44,24 @@ openSock = open `catch` handler
             listen s 5
             threadDelay 5000000
             return $ Right s)
-    handler :: SomeException -> IO (Either ErrMsg Socket)
+    handler :: IOException -> IO (Either ErrMsg Socket)
     handler e = do
       putStrLn $ "Running e handler"
-      putStrLn $ "Exception is [" ++ show e ++ "]"
+      let t = ioe_errno e
+      putStrLn $ "Exception is [" ++ show t ++ "][" ++ show e ++ "]"
       return $ Left $ "*** Exception: " ++ show e
 
+
+readSock :: Socket -> IO (Either ErrMsg String)
+readSock s = recv' `catch` handler
+  where
+    recv' = liftM Right $ recv s 8
+    handler :: IOException -> IO (Either ErrMsg String)
+    handler e = do
+      putStrLn $ "Running e handler"
+      let t = ioe_errno e
+      putStrLn $ "Exception is [" ++ show t ++ "][" ++ show e ++ "]"
+      return $ Left $ "*** Exception: " ++ show e
 
 {-
   readFromSocket chunk => if it fails we should be closing the socket
