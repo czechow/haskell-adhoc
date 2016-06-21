@@ -8,6 +8,7 @@ import Control.Exception
 import Network.Socket
 import Control.Monad
 import GHC.IO.Exception
+import qualified Data.Set as S
 
 longFileRead :: Handle -> IO String
 longFileRead h = do
@@ -35,7 +36,8 @@ openSock = open `catch` handler
     open =
       bracketOnError
         (socket AF_INET Stream defaultProtocol)
-        (close)
+        (\s -> do close s
+                  putStrLn "Running handler in bracket")
         (\s -> do
             setSocketOption s ReuseAddr 1
             hostAddr <- inet_addr "127.0.0.1"
@@ -52,17 +54,29 @@ openSock = open `catch` handler
       return $ Left $ "*** Exception: " ++ show e
 
 
-readSock :: Socket -> IO (Either ErrMsg String)
+data SockReadRes = SRRData String
+                 | SRRClose
+                 | SRRErr (Maybe Int) ErrMsg
+                 deriving Show
+
+closeCodes :: S.Set Int
+closeCodes = S.fromList [104]
+
+
+readSock :: Socket -> IO SockReadRes
 readSock s = recv' `catch` handler
   where
-    recv' = liftM Right $ recv s 8
-    handler :: IOException -> IO (Either ErrMsg String)
+    recv' = liftM SRRData $ recv s 8
+    handler :: IOException -> IO SockReadRes
     handler e = do
       putStrLn $ "Running e handler"
-      let t = ioe_errno e
-      putStrLn $ "Exception is [" ++ show t ++ "][" ++ show e ++ "]"
-      return $ Left $ "*** Exception: " ++ show e
-
+      let maybeErrCode = fromInteger . toInteger <$> ioe_errno e
+      putStrLn $ "Exception is [" ++ show maybeErrCode ++ "][" ++ show e ++ "]"
+      case maybeErrCode of
+        Nothing -> return $ SRRErr Nothing (show e)
+        Just code -> if S.member code closeCodes
+                     then return SRRClose
+                     else return $ SRRErr (Just code) (show e)
 {-
   readFromSocket chunk => if it fails we should be closing the socket
 
