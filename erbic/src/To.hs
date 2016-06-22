@@ -50,42 +50,58 @@ openSock = open `catch` handler
     handler e = do
       putStrLn $ "Running e handler"
       let t = ioe_errno e
-      putStrLn $ "Exception is [" ++ show t ++ "][" ++ show e ++ "]"
+      let t2 = ioe_type e
+      putStrLn $ "Exception is [" ++ show t ++ "][" ++ show t2 ++ "][" ++ show e ++ "]"
       return $ Left $ "*** Exception: " ++ show e
 
 
 data SockReadRes = SRRData String
-                 | SRRClose
+                 | SRRClosed
                  | SRRErr (Maybe Int) ErrMsg
                  deriving Show
 
-closeCodes :: S.Set Int
-closeCodes = S.fromList [104]
-
 
 readSock :: Socket -> IO SockReadRes
-readSock s = recv' `catch` handler
+readSock s = readWith (recv s 8)
+
+
+readWith :: IO String -> IO SockReadRes
+readWith readFun = recv' `catch` handler
   where
-    recv' = liftM SRRData $ recv s 8
+    recv' = liftM SRRData $ readFun
     handler :: IOException -> IO SockReadRes
     handler e = do
       putStrLn $ "Running e handler"
       let maybeErrCode = fromInteger . toInteger <$> ioe_errno e
       putStrLn $ "Exception is [" ++ show maybeErrCode ++ "][" ++ show e ++ "]"
-      case maybeErrCode of
-        Nothing -> return $ SRRErr Nothing (show e)
-        Just code -> if S.member code closeCodes
-                     then return SRRClose
-                     else return $ SRRErr (Just code) (show e)
-{-
-  readFromSocket chunk => if it fails we should be closing the socket
+      case (ioe_type e) of
+        EOF -> return SRRClosed
+        _ -> return $ SRRErr maybeErrCode (show e)
 
-  What we really want to have is an event driven logic processing
-  triggering loop separated from other processing with a bounded queue
 
-  s <- readFromSocket -- wrapped with either => no exceptions
-
--}
+main :: IO ()
+main = do
+  errOrSock <- openSock
+  case errOrSock of
+    Left err -> putStrLn $ "Error opening socket: [" ++ err ++ "]"
+    Right s ->
+      bracket (do (s', otherAddr) <- accept s
+                  putStrLn $ "Conn from [" ++ show otherAddr ++ "] accepted"
+                  return s')
+              (\s' -> do close s'
+                         close s)
+              (\s' -> readLoop s')
+  where
+    readLoop :: Socket -> IO ()
+    readLoop s'' = do
+      sr <- readSock s''
+      case sr of
+        SRRClosed -> putStrLn $ "Other party closed channel"
+        SRRData str -> do putStrLn $ "Received [" ++ str ++ "]"
+                          readLoop s''
+        SRRErr Nothing errMsg -> putStrLn $ "Socket error " ++ errMsg
+        SRRErr (Just errCode) errMsg ->
+          putStrLn $ "Socket error [" ++ show errCode ++ "]: " ++ errMsg
 
 testAsyncExceptions :: IO ()
 testAsyncExceptions = do
