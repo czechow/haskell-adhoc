@@ -8,7 +8,6 @@ import Control.Exception
 import Network.Socket
 import Control.Monad
 import GHC.IO.Exception
-import qualified Data.Set as S
 import Data.List.Split
 
 longFileRead :: Handle -> IO String
@@ -19,15 +18,6 @@ longFileRead h = do
   line2 <- hGetLine h
   return $ line1 ++ line2
 
-run :: IO ()
-run = do
-  h <- openFile "test.txt" ReadMode
-  mto <- timeout 1500000 (longFileRead h)
-  case mto of
-    Just c -> putStrLn $ "Long read cont: [" ++ c ++ "]"
-    Nothing -> putStrLn "Timed out"
-  hGetContents h >>= \r -> (putStrLn $ "Rest: [" ++ r ++ "]")
-  hClose h
 
 type ErrMsg = String
 
@@ -121,7 +111,7 @@ main = do
 
 
 sep :: String
-sep = "\r\n"
+sep = "-"
 
 maxBuffLen :: Int
 maxBuffLen = 13
@@ -143,7 +133,9 @@ scanForMsg fRead b = readLoop fRead b PPIn
       | otherwise = do
           case (splitOn sep buff, pp) of
             (a@(_ : _ : _), PPIn) -> return $ Right $ (init a, last a)
-            (a@(_ : _ : _), PPOut) -> return $ Right $ (init $ tail a, last a)
+            (a@(m : _ : _), PPOut) -> do
+              putStrLn $ "Out of sync [beg], dropped " ++ show (length m) ++ "  chars"
+              return $ Right $ (init $ tail a, last a)
             (m : ms, PPOut) -> do
               putStrLn $ "Out of sync, dropped " ++ show (length m) ++ " chars"
               readDataAndLoop fRd (concat ms) PPOut
@@ -180,12 +172,25 @@ fthr = forkIO $ finally (do
                         )
                         (putStrLn "Exception, cleanup")
 
-testAsyncExceptions :: IO ()
-testAsyncExceptions = do
-  nt <- forkIO $ do
-    _ <- openSock
-    return ()
-  threadDelay $ 2 * 1000 * 1000
-  putStrLn $ "Killing thread " ++ show nt
-  killThread nt
-  threadDelay $ 5 * 1000 * 1000
+
+run :: IO ()
+run = do
+  s <- openSock
+  case s of
+    Left(err) -> putStrLn err
+    Right(s0) -> do
+      (s', addr) <- accept s0
+      putStrLn $ "Conn from " ++ show addr
+      loopForMessages s' []
+      close s0
+  where
+    loopForMessages s' buff = do
+      errOrMsgs <- scanForMsg (readSock s') buff
+      case errOrMsgs of
+        Right (msgs, buff') -> do
+          mapM_ (\m -> putStrLn $ "Received msg [" ++ m ++ "]") msgs
+          loopForMessages s' buff'
+        Left err -> do
+          putStrLn err
+          putStrLn "Stopping program"
+          close s'
