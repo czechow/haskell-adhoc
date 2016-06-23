@@ -124,17 +124,17 @@ type Buffer = String
 scanForMsg :: IO SockReadRes -> Buffer -> IO (Either String ([String], Buffer))
 scanForMsg fRead b = readLoop fRead b PPIn
   where
-    readLoop :: IO SockReadRes -> Buffer -> PacketParse
-             -> IO (Either String ([String], Buffer))
     readLoop fRd buff pp
       | length buff > maxBuffLen = do
-          putStrLn $ "Buff too long, dropped " ++ show (length buff - maxBuffLen) ++ " chars"
+          putStrLn $ "Buff too long, dropped " ++
+                     show (length buff - maxBuffLen) ++ " chars"
           readLoop fRd (drop (length buff - maxBuffLen) buff) PPOut
       | otherwise = do
           case (splitOn sep buff, pp) of
             (a@(_ : _ : _), PPIn) -> return $ Right $ (init a, last a)
             (a@(m : _ : _), PPOut) -> do
-              putStrLn $ "Out of sync [beg], dropped " ++ show (length m) ++ "  chars"
+              putStrLn $ "Out of sync [beg], dropped " ++
+                         show (length m) ++ "  chars"
               return $ Right $ (init $ tail a, last a)
             (m : ms, PPOut) -> do
               putStrLn $ "Out of sync, dropped " ++ show (length m) ++ " chars"
@@ -142,8 +142,6 @@ scanForMsg fRead b = readLoop fRead b PPIn
             (_, PPIn) -> do readDataAndLoop fRd buff PPIn
             ([], pp') -> do readDataAndLoop fRd [] pp'
 
-    readDataAndLoop :: IO SockReadRes -> Buffer -> PacketParse
-                    -> IO (Either String ([String], Buffer))
     readDataAndLoop fRd buff pp = do
       res <- fRd
       case res of
