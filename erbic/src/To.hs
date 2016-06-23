@@ -9,6 +9,7 @@ import Network.Socket
 import Control.Monad
 import GHC.IO.Exception
 import qualified Data.Set as S
+import Data.List.Split
 
 longFileRead :: Handle -> IO String
 longFileRead h = do
@@ -82,6 +83,9 @@ readWith readFun = recv' `catch` handler
 main :: IO ()
 main = do
   errOrSock <- openSock
+  -- FIXME: possibly race conditions here =>
+  -- We already have a socket, but if an async exception happens here
+  -- we will be loosing the socket...
   case errOrSock of
     Left err -> putStrLn $ "Error opening socket: [" ++ err ++ "]"
     Right s ->
@@ -102,6 +106,79 @@ main = do
         SRRErr Nothing errMsg -> putStrLn $ "Socket error " ++ errMsg
         SRRErr (Just errCode) errMsg ->
           putStrLn $ "Socket error [" ++ show errCode ++ "]: " ++ errMsg
+
+-- A function "read from socket" that delivers full messages
+-- IO SocketReadRes
+
+{-
+  loop:
+    scanForPackets
+      socket <- readFromSocket(Err,Msg,Nothing)
+      case closed channel => issue msg, close socket, kill itself
+      case Err => report error, close socket, kill itself
+      case Data => put data into channel; loop
+-}
+
+
+sep :: String
+sep = "\r\n"
+
+maxBuffLen :: Int
+maxBuffLen = 13
+
+data PacketParse = PPIn | PPOut
+
+type Buffer = String
+
+-- FIXME: bracket here?
+scanForMsg :: IO SockReadRes -> Buffer -> IO (Either String ([String], Buffer))
+scanForMsg fRead b = readLoop fRead b PPIn
+  where
+    readLoop :: IO SockReadRes -> Buffer -> PacketParse
+             -> IO (Either String ([String], Buffer))
+    readLoop fRd buff pp
+      | length buff > maxBuffLen = do
+          putStrLn $ "Buff too long, dropped " ++ show (length buff - maxBuffLen) ++ " chars"
+          readLoop fRd (drop (length buff - maxBuffLen) buff) PPOut
+      | otherwise = do
+          case (splitOn sep buff, pp) of
+            (a@(_ : _ : _), PPIn) -> return $ Right $ (init a, last a)
+            (a@(_ : _ : _), PPOut) -> return $ Right $ (init $ tail a, last a)
+            (m : ms, PPOut) -> do
+              putStrLn $ "Out of sync, dropped " ++ show (length m) ++ " chars"
+              readDataAndLoop fRd (concat ms) PPOut
+            (_, PPIn) -> do readDataAndLoop fRd buff PPIn
+            ([], pp') -> do readDataAndLoop fRd [] pp'
+
+    readDataAndLoop :: IO SockReadRes -> Buffer -> PacketParse
+                    -> IO (Either String ([String], Buffer))
+    readDataAndLoop fRd buff pp = do
+      res <- fRd
+      case res of
+        SRRClosed -> return $ Left "All ok, channel closed"
+        SRRErr code _ -> return $ Left $ "Some error: " ++ show code
+        SRRData d -> readLoop fRd (buff ++ d) pp
+
+
+
+
+fib :: Integer -> Integer
+fib n
+  | n <= 0 = 0
+  | n == 1 = 1
+  | n == 2 = 2
+  | otherwise = fib (n - 2) + fib (n - 1)
+
+fthr :: IO ThreadId
+fthr = forkIO $ finally (do
+                            putStrLn "Start"
+                            let x = fib 36
+                            putStrLn "Stop"
+                            putStrLn ""
+                            putStrLn $ "Fib is: " ++ show x
+                            putStrLn "-------------------------------------------------"
+                        )
+                        (putStrLn "Exception, cleanup")
 
 testAsyncExceptions :: IO ()
 testAsyncExceptions = do
