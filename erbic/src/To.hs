@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module To where
 
 
@@ -9,6 +11,9 @@ import Network.Socket
 import Control.Monad
 import GHC.IO.Exception
 import Data.List.Split
+import Data.IORef
+import System.Random
+
 
 longFileRead :: Handle -> IO String
 longFileRead h = do
@@ -192,3 +197,31 @@ run = do
           putStrLn err
           putStrLn "Stopping program"
           close s'
+
+sample :: String
+sample = "This is a very important text which is very cool"
+
+
+mockSockReader :: IORef String -> IO SockReadRes
+mockSockReader strRef = do
+  readIORef strRef >>= \case
+    [] -> return SRRClosed
+    str -> do
+      gen <- newStdGen
+      let (i, _) = randomR (0, 7) gen
+          (msg, str') = splitAt i str
+      writeIORef strRef str'
+      return $ SRRData msg
+
+samples :: IO ()
+samples = do
+  vRef <- newIORef sample
+  let f = mockSockReader vRef
+  loop f
+  where
+    loop f' = do
+      v <- f'
+      case v of
+        SRRData msgs -> putStrLn ("[" ++ msgs ++ "]") >> loop f'
+        SRRClosed -> putStrLn "Closed"
+        SRRErr _ eMsg -> putStrLn eMsg
