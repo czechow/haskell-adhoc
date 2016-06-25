@@ -223,5 +223,18 @@ samples = do
       v <- f'
       case v of
         SRRData msgs -> putStrLn ("[" ++ msgs ++ "]") >> loop f'
-        SRRClosed -> putStrLn "Closed"
+        SRRClosed -> putStrLn "*** Closed ***"
         SRRErr _ eMsg -> putStrLn eMsg
+
+
+
+testBracket :: Int -> IO ()
+testBracket delSecs =
+  bracket (openSock)
+          (\case Left(err) -> putStrLn err
+                 Right(s) -> putStrLn "Closing outer" >> close s)
+          (processing)
+  where
+    processing _ = do
+      putStrLn $ "Delaying processing thread for " ++ show delSecs ++ "s"
+      threadDelay $ delSecs * 1000 * (1000 :: Int)
