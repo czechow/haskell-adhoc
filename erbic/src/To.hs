@@ -13,7 +13,7 @@ import GHC.IO.Exception
 import Data.List.Split
 import Data.IORef
 import System.Random
-
+import GHC.IO (unsafeUnmask)
 
 longFileRead :: Handle -> IO String
 longFileRead h = do
@@ -33,7 +33,9 @@ openSock = open `catch` handler
       bracketOnError
         (socket AF_INET Stream defaultProtocol)
         (\s -> do close s
-                  putStrLn "Running handler in bracket")
+                  putStrLn "Running handler in bracket"
+                  ms <- getMaskingState
+                  putStrLn $ "Mask state is " ++ show ms)
         (\s -> do
             setSocketOption s ReuseAddr 1
             hostAddr <- inet_addr "127.0.0.1"
@@ -47,7 +49,8 @@ openSock = open `catch` handler
       putStrLn $ "Running e handler"
       let t = ioe_errno e
       let t2 = ioe_type e
-      putStrLn $ "Exception is [" ++ show t ++ "][" ++ show t2 ++ "][" ++ show e ++ "]"
+      putStrLn $
+        "Exception is [" ++ show t ++ "][" ++ show t2 ++ "][" ++ show e ++ "]"
       return $ Left $ "*** Exception: " ++ show e
 
 
@@ -208,7 +211,7 @@ mockSockReader strRef = do
     [] -> return SRRClosed
     str -> do
       gen <- newStdGen
-      let (i, _) = randomR (0, 7) gen
+      let (i, _) = randomR (0, 8) gen
           (msg, str') = splitAt i str
       writeIORef strRef str'
       return $ SRRData msg
@@ -232,9 +235,112 @@ testBracket :: Int -> IO ()
 testBracket delSecs =
   bracket (openSock)
           (\case Left(err) -> putStrLn err
-                 Right(s) -> putStrLn "Closing outer" >> close s)
+                 Right(s) -> putStrLn "Closing outer" >>
+                             close s)
           (processing)
   where
-    processing _ = do
-      putStrLn $ "Delaying processing thread for " ++ show delSecs ++ "s"
-      threadDelay $ delSecs * 1000 * (1000 :: Int)
+    processing _ =
+      bracket_ (putStrLn "Opening inner")
+               (putStrLn "Closing inner")
+               (processing')
+      where
+        processing' = do
+          putStrLn $ "Delaying processing thread for " ++ show delSecs ++ "s"
+          threadDelay $ delSecs * 1000 * (1000 :: Int)
+          putStrLn $ "Calculating fibs"
+          let res = fib 30
+          putStrLn $ "Res is " ++ show res
+
+
+tBr :: IO ()
+tBr = bracket_ (do ms <- getMaskingState
+                   putStrLn $ "A: Mask state is " ++ show ms
+                   putStrLn "Fib calc..."
+                   allowInterrupt
+                   ms' <- getMaskingState
+                   putStrLn $ "A: Mask state is " ++ show ms'
+                   --threadDelay $ 10 * 1000 * 1000
+                   unsafeUnmask $ do
+                     ms'' <- getMaskingState
+                     putStrLn $ "A: Mask state is " ++ show ms''
+                     fibIO 30)
+               (do ms <- getMaskingState
+                   putStrLn $ "C: Mask state is " ++ show ms)
+               (do ms <- getMaskingState
+                   putStrLn $ "B: Mask state is " ++ show ms)
+
+fibIO :: Integer -> IO ()
+fibIO n = do let x = fib n
+             putStrLn $ show x
+
+{-
+  Now: check how threads spawned by other thread behave...
+-}
+
+
+testThreads :: IO ()
+testThreads = do
+  t <- forkIO $ bracket
+       (mapM (\_ -> startNewThr) [1::Int .. 3])
+       (\thrs -> do putStrLn $ "Killing threads " ++ show thrs
+                    mapM_ killThread thrs
+                    putStrLn $ "Thread finished")
+       (\thrs -> do
+           putStrLn $ "Started threads: " ++ show thrs
+           threadDelay $ 10 * 1000 * 1000)
+
+  threadDelay $ 3 * 1000 * 1000
+  killThread t
+  return ()
+  where
+    startNewThr :: IO ThreadId
+    startNewThr = forkFinally
+                  (threadDelay $ 10 * 1000 * 1000) $
+                  \e -> putStrLn $ "Thread finished by " ++ show e
+
+
+{-
+MainThread
+- spawns accThread (bracketed?)
+- spawns console reader thread
+- waits for both to terminate
+
+
+
+Can mainThread be killed??/
+
+
+openSocket
+-}
+
+
+accThread :: IO ()
+accThread = bracket
+            (openSock)
+            (\case
+                Left err -> putStrLn $ "Error opening socket: [" ++ err ++ "]"
+                Right s -> do putStrLn $ "Closing socket " ++ show s
+                              close s)
+            (\case
+                Left _ -> return ()
+                Right s -> acceptLoop s)
+  where
+    acceptLoop s =
+      bracketOnError (do (s', otherAddr) <- accept s
+                         putStrLn $
+                           "Conn from [" ++ show otherAddr ++ "] accepted"
+                         putStrLn $ "New socket is " ++ show s'
+                         return s')
+                     (\s' -> do putStrLn $ "Closing socket " ++ show s'
+                                close s')
+                     (\s' -> readLoop s')
+    readLoop :: Socket -> IO ()
+    readLoop s'' = do
+      sr <- readSock s''
+      case sr of
+        SRRClosed -> putStrLn $ "Other party closed channel"
+        SRRData str -> do putStrLn $ "Received [" ++ str ++ "]"
+                          readLoop s''
+        SRRErr Nothing errMsg -> putStrLn $ "Socket error " ++ errMsg
+        SRRErr (Just errCode) errMsg ->
+          putStrLn $ "Socket error [" ++ show errCode ++ "]: " ++ errMsg
