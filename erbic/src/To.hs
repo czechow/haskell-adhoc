@@ -314,6 +314,64 @@ openSocket
 -}
 
 
+
+accSock :: Socket -> IO (Either ErrMsg Socket)
+accSock s =
+  mask $ \_ ->
+  do
+    ms <- getMaskingState
+    putStrLn $ "Mask state is " ++  show ms
+    res <- try (do (s', _) <- accept s
+                   putStrLn $ "Accept ok, new socket " ++ show s'
+                   return s') :: IO (Either SomeException Socket)
+    case res of
+      Right s'' -> return $ Right s''
+      Left ex -> return $ Left $ show ex
+
+{-
+srvConn2 :: Socket -> IO (Either String ThreadId)
+srvConn2 s = mask $ \restoreMask -> do
+  accSock s >>= \case
+    Left e -> return $ Left e
+    Right s' -> do tid <- forkFinally (restoreMask $ doServeConn s')
+                          (\_ -> do close s'
+                                    putStrLn $ "Sock closed " ++ show s')
+                   return $ Right tid
+-}
+
+srvConn2 :: Socket -> IO (Either String ThreadId)
+srvConn2 s = mask $ \restoreMask -> do
+  accSock s >>= \case
+    Left e -> return $ Left e
+    Right s' -> do r <- try (restoreMask $ doServeConn s')
+                   case r of
+                     Right _ -> fmap Right myThreadId
+                     Left err -> do close s'
+                                    putStrLn $ "Sock closed " ++ show s'
+                                    return $ Left $ show (err :: SomeException)
+
+
+doServeConn :: Socket -> IO ()
+doServeConn s = do
+  ms <- getMaskingState
+  putStrLn $ "doServerConn: Mask state is " ++  show ms
+  recv s 16 >>= putStrLn
+  doServeConn s
+
+
+doAll :: IO ()
+doAll = bracket
+        (openSock)
+        (\case
+            Right s -> do close s
+                          putStrLn $ "Closed socket " ++ show s
+            Left e -> putStrLn e)
+        (\case
+            Right s -> do _ <- srvConn2 s
+                          return ()
+            Left e -> putStrLn e)
+
+
 accThread :: IO ()
 accThread = bracket
             (openSock)
