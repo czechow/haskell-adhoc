@@ -128,7 +128,6 @@ data PacketParse = PPIn | PPOut
 
 type Buffer = String
 
--- FIXME: bracket here?
 scanForMsg :: IO SockReadRes -> Buffer -> IO (Either String ([String], Buffer))
 scanForMsg fRead b = readLoop fRead b PPIn
   where
@@ -167,16 +166,6 @@ fib n
   | n == 2 = 2
   | otherwise = fib (n - 2) + fib (n - 1)
 
-fthr :: IO ThreadId
-fthr = forkIO $ finally (do
-                            putStrLn "Start"
-                            let x = fib 36
-                            putStrLn "Stop"
-                            putStrLn ""
-                            putStrLn $ "Fib is: " ++ show x
-                            putStrLn "-------------------------------------------------"
-                        )
-                        (putStrLn "Exception, cleanup")
 
 
 run :: IO ()
@@ -305,12 +294,7 @@ MainThread
 - spawns console reader thread
 - waits for both to terminate
 
-
-
 Can mainThread be killed??/
-
-
-openSocket
 -}
 
 
@@ -320,7 +304,7 @@ accSock s =
   mask $ \_ ->
   do
     ms <- getMaskingState
-    putStrLn $ "Mask state is " ++  show ms
+    putStrLn $ "accSock: Mask state is " ++  show ms
     res <- try (do (s', _) <- accept s
                    putStrLn $ "Accept ok, new socket " ++ show s'
                    return s') :: IO (Either SomeException Socket)
@@ -328,16 +312,14 @@ accSock s =
       Right s'' -> return $ Right s''
       Left ex -> return $ Left $ show ex
 
-{-
-srvConn2 :: Socket -> IO (Either String ThreadId)
-srvConn2 s = mask $ \restoreMask -> do
+srvConn :: Socket -> IO (Either String ThreadId)
+srvConn s = mask $ \restoreMask -> do
   accSock s >>= \case
     Left e -> return $ Left e
     Right s' -> do tid <- forkFinally (restoreMask $ doServeConn s')
                           (\_ -> do close s'
                                     putStrLn $ "Sock closed " ++ show s')
                    return $ Right tid
--}
 
 srvConn2 :: Socket -> IO (Either String ThreadId)
 srvConn2 s = mask $ \restoreMask -> do
@@ -345,7 +327,7 @@ srvConn2 s = mask $ \restoreMask -> do
     Left e -> return $ Left e
     Right s' -> do r <- try (restoreMask $ doServeConn s')
                    case r of
-                     Right _ -> fmap Right myThreadId
+                     Right _ -> liftM Right myThreadId
                      Left err -> do close s'
                                     putStrLn $ "Sock closed " ++ show s'
                                     return $ Left $ show (err :: SomeException)
@@ -364,11 +346,14 @@ doAll = bracket
         (openSock)
         (\case
             Right s -> do close s
-                          putStrLn $ "Closed socket " ++ show s
-            Left e -> putStrLn e)
+                          putStrLn $ "doAll: Closed socket " ++ show s
+            Left e -> putStrLn $ "Error opening socket: " ++ e)
         (\case
-            Right s -> do _ <- srvConn2 s
-                          return ()
+            Right s -> (do errOrTid <- srvConn2 s
+                           case errOrTid of
+                             Right tid -> putStrLn $ "Connection running in thread " ++ show tid
+                             Left errMsg -> fail errMsg)
+
             Left e -> putStrLn e)
 
 
@@ -402,3 +387,13 @@ accThread = bracket
         SRRErr Nothing errMsg -> putStrLn $ "Socket error " ++ errMsg
         SRRErr (Just errCode) errMsg ->
           putStrLn $ "Socket error [" ++ show errCode ++ "]: " ++ errMsg
+
+
+excTest :: IO ()
+excTest = (do
+  putStrLn "Sleeping";
+  threadDelay $ 20 * 1000 * 1000
+  putStrLn "Sleep finished") `catch` handler
+  where
+    handler :: SomeException -> IO ()
+    handler e = putStrLn $ "Caught [" ++ show e ++ "]"
