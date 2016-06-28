@@ -62,8 +62,9 @@ readWith readFun = recv' `catch` handler
         EOF -> return SRRClosed
         _ -> return $ SRRErr maybeErrCode (show e)
 
-srvConn :: Socket -> IO ThreadId
-srvConn s =
+srvConn :: Int -> Socket -> IO ()
+srvConn 0 _ = return ()
+srvConn n s =
   mask $ \restoreMask ->
     do putStrLn $ "srvConn: Accepting requests"
        (s', _) <- accept s
@@ -71,7 +72,7 @@ srvConn s =
               (\_ -> do close s'
                         putStrLn $ "Sock closed " ++ show s')
        putStrLn $ "srvConn: new connection served by thread " ++ show tid
-       return tid
+       restoreMask $ srvConn (pred n) s
 
 
 doServeConn :: Socket -> IO ()
@@ -82,10 +83,10 @@ doServeConn s = do
   doServeConn s
 
 
-doAll :: IO ()
-doAll = bracket
-        (openSock)
-        (\s -> do close s
-                  putStrLn $ "doAll: Closed socket " ++ show s)
-        (\s -> do _ <- srvConn s
-                  return ())
+doAll :: Int -> IO ()
+doAll n = bracket
+          (openSock)
+          (\s -> do close s
+                    putStrLn $ "doAll: Closed socket " ++ show s)
+          (\s -> do _ <- srvConn n s
+                    return ())
