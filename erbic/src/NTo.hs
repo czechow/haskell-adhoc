@@ -14,20 +14,16 @@ import Data.List.Split
 import Data.IORef
 import System.Random
 import GHC.IO (unsafeUnmask)
-
+import qualified Data.Set as S
 
 type ErrMsg = String
 
 -- This may throw an exception
 openSock :: IO Socket
-openSock = open'
-  where
-    open' =
+openSock =
       bracketOnError
         (socket AF_INET Stream defaultProtocol)
         (\s -> do close s
-                  ms <- getMaskingState
-                  putStrLn $ "openSock: handler in bracket: Mask state is " ++ show ms
                   putStrLn $ "openSock: Socket closed " ++ show s)
         (\s -> do
             setSocketOption s ReuseAddr 1
@@ -62,17 +58,29 @@ readWith readFun = recv' `catch` handler
         EOF -> return SRRClosed
         _ -> return $ SRRErr maybeErrCode (show e)
 
-srvConn :: Int -> Socket -> IO ()
-srvConn 0 _ = return ()
-srvConn n s =
+srvConn :: MVar (S.Set ThreadId) -> Socket -> IO ()
+srvConn mvThreads s =
   mask $ \restoreMask ->
     do putStrLn $ "srvConn: Accepting requests"
        (s', _) <- accept s
-       tid <- forkFinally (restoreMask $ doServeConn s')
-              (\_ -> do close s'
-                        putStrLn $ "Sock closed " ++ show s')
+       tid <- forkFinally (thrBody s' restoreMask)
+                          (thrHandler s')
        putStrLn $ "srvConn: new connection served by thread " ++ show tid
-       restoreMask $ srvConn (pred n) s
+         where
+           thrBody s'' restoreMask'' = do
+             modifyMVar_ mvThreads $
+                         \ts -> flip S.insert ts <$> myThreadId
+             restoreMask'' $ doServeConn s''
+           -- FIXME: what if async exception strikes on blocking mvar oper?
+           -- probably we should use total masking to avoid the danger...
+           thrHandler s'' = \_ -> do
+             close s''
+             putStrLn $ "Sock closed " ++ show s''
+             modifyMVar_ mvThreads $
+                         \ts -> flip S.delete ts <$> myThreadId
+
+nset :: IO (MVar (S.Set ThreadId))
+nset = newMVar S.empty
 
 
 doServeConn :: Socket -> IO ()
@@ -83,10 +91,15 @@ doServeConn s = do
   doServeConn s
 
 
-doAll :: Int -> IO ()
-doAll n = bracket
-          (openSock)
-          (\s -> do close s
-                    putStrLn $ "doAll: Closed socket " ++ show s)
-          (\s -> do _ <- srvConn n s
-                    return ())
+doAll :: MVar (S.Set ThreadId) -> Int -> IO ()
+doAll mv n = bracket
+             (openSock)
+             (\s -> do close s
+                       putStrLn $ "doAll: Closed socket " ++ show s)
+             (\s -> loop n s)
+  where
+    loop :: Int -> Socket -> IO ()
+    loop n' s
+      | n' <= 0 = return ()
+      | otherwise = do _ <- srvConn mv s
+                       loop (pred n') s
