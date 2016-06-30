@@ -28,7 +28,7 @@ library
                      , network
                      , split
                      , random
-                     , pretty-show                     
+                     , pretty-show
   default-language:    Haskell2010
 
 executable erbic

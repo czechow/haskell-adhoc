@@ -41,22 +41,22 @@ data SockReadRes = SRRData String
                  deriving Show
 
 
-readSock :: Socket -> IO SockReadRes
-readSock s = readWith (recv s 8)
+-- readSock :: Socket -> IO SockReadRes
+-- readSock s = readWith (recv s 8)
 
 
-readWith :: IO String -> IO SockReadRes
-readWith readFun = recv' `catch` handler
-  where
-    recv' = liftM SRRData $ readFun
-    handler :: IOException -> IO SockReadRes
-    handler e = do
-      putStrLn $ "Running e handler"
-      let maybeErrCode = fromInteger . toInteger <$> ioe_errno e
-      putStrLn $ "Exception is [" ++ show maybeErrCode ++ "][" ++ show e ++ "]"
-      case (ioe_type e) of
-        EOF -> return SRRClosed
-        _ -> return $ SRRErr maybeErrCode (show e)
+-- readWith :: IO String -> IO SockReadRes
+-- readWith readFun = recv' `catch` handler
+--   where
+--     recv' = liftM SRRData $ readFun
+--     handler :: IOException -> IO SockReadRes
+--     handler e = do
+--       putStrLn $ "Running e handler"
+--       let maybeErrCode = fromInteger . toInteger <$> ioe_errno e
+--       putStrLn $ "Exception is [" ++ show maybeErrCode ++ "][" ++ show e ++ "]"
+--       case (ioe_type e) of
+--         EOF -> return SRRClosed
+--         _ -> return $ SRRErr maybeErrCode (show e)
 
 srvConn :: MVar (S.Set ThreadId) -> Socket -> IO ()
 srvConn mvThreads s =
@@ -103,3 +103,30 @@ doAll mv n = bracket
       | n' <= 0 = return ()
       | otherwise = do _ <- srvConn mv s
                        loop (pred n') s
+
+
+mvInt :: IO (MVar Int)
+mvInt = newMVar 0
+
+
+conc :: MVar Int -> IO ()
+conc mv = do
+  modifyMVar_ mv $ return . const 0
+  conc mv
+
+
+isCloseIntr :: MVar Int -> IO ()
+isCloseIntr mv = do
+  s <- openSock
+  putStrLn $ "Repeatedly closing socket"
+  mask_ $ loop s
+    where
+      loop s' = do close s'
+                   uninterruptibleMask $ \_ -> modifyMVar_ mv $ return . succ
+                   loop s'
+
+nonIntr :: IO ()
+nonIntr = do
+  mask_ (do putStrLn "Sleep started"
+            threadDelay $ 10 * 1000 * 1000
+            putStrLn "Sleep stopped")
