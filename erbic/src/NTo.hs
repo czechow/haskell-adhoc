@@ -68,16 +68,16 @@ srvConn mvThreads s =
        putStrLn $ "srvConn: new connection served by thread " ++ show tid
          where
            thrBody s'' restoreMask'' = do
-             modifyMVar_ mvThreads $
-                         \ts -> flip S.insert ts <$> myThreadId
+             uninterruptibleMask_ $
+               modifyMVar_ mvThreads
+                           (\ts -> flip S.insert ts <$> myThreadId)
              restoreMask'' $ doServeConn s''
-           -- FIXME: what if async exception strikes on blocking mvar oper?
-           -- probably we should use total masking to avoid the danger...
            thrHandler s'' = \_ -> do
              close s''
+             uninterruptibleMask_ $
+               modifyMVar_ mvThreads
+                           (\ts -> flip S.delete ts <$> myThreadId)
              putStrLn $ "Sock closed " ++ show s''
-             modifyMVar_ mvThreads $
-                         \ts -> flip S.delete ts <$> myThreadId
 
 nset :: IO (MVar (S.Set ThreadId))
 nset = newMVar S.empty
