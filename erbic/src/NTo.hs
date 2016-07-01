@@ -130,3 +130,67 @@ nonIntr = do
   mask_ (do putStrLn "Sleep started"
             threadDelay $ 10 * 1000 * 1000
             putStrLn "Sleep stopped")
+
+
+class SockService a where
+  ssOpen :: IO a
+  ssClose :: a -> IO ()
+  ssRead :: a -> IO String
+  ssAccept :: a -> IO (a, String)
+
+instance SockService Socket where
+  ssOpen =
+      bracketOnError
+        (socket AF_INET Stream defaultProtocol)
+        (\s -> ssClose s)
+        (\s -> do setSocketOption s ReuseAddr 1
+                  hostAddr <- inet_addr "127.0.0.1"
+                  bind s (SockAddrInet 2222 hostAddr)
+                  listen s 5
+                  return s)
+  ssClose s = close s
+  ssRead s = recv s 16
+  ssAccept s = do (s', sockAddr) <- accept s
+                  return (s', show sockAddr)
+
+newtype MockSocket = MockSocket ()
+
+instance SockService MockSocket where
+  ssOpen = return $ MockSocket ()
+  ssClose _ = return ()
+  ssRead _ = do threadDelay $ 3 * 1000 * 1000
+                return $ "This and that and nothing else"
+  ssAccept _ = return (MockSocket(), "127.0.0.1")
+
+
+newMS :: MockSocket
+newMS = MockSocket ()
+
+------------------------
+srvConn2 :: SockService ss => MVar (S.Set ThreadId) -> ss -> IO ()
+srvConn2 mvThreads s =
+  mask $ \restoreMask ->
+    do putStrLn $ "srvConn: Accepting requests"
+       (s', _) <- ssAccept s
+       tid <- forkFinally (thrBody s' restoreMask)
+                          (thrHandler s')
+       putStrLn $ "srvConn: new connection served by thread " ++ show tid
+         where
+           thrBody s'' restoreMask'' = do
+             uninterruptibleMask_ $
+               modifyMVar_ mvThreads
+                           (\ts -> flip S.insert ts <$> myThreadId)
+             restoreMask'' $ doServeConn2 s''
+           thrHandler s'' = \_ -> do
+             ssClose s''
+             uninterruptibleMask_ $
+               modifyMVar_ mvThreads
+                           (\ts -> flip S.delete ts <$> myThreadId)
+
+
+doServeConn2 :: SockService ss => ss -> IO ()
+doServeConn2 s = do
+  ms <- getMaskingState
+  putStrLn $ "doServerConn: Mask state is " ++  show ms
+  ssRead s >>= putStrLn
+  doServeConn2 s
