@@ -194,3 +194,39 @@ doServeConn2 s = do
   putStrLn $ "doServerConn: Mask state is " ++  show ms
   ssRead s >>= putStrLn
   doServeConn2 s
+
+
+
+-----------------------------------------------------------------------------
+type Buffer = String
+
+data PacketParse = PPIn | PPOut
+                 deriving Show
+
+type LogMsg = String
+
+maxBuffLen :: Int
+maxBuffLen = 23
+
+sep :: String
+sep = "-"
+
+data ParseRes = PRData [String]
+              | PRNeedMoreData
+              deriving Show
+
+scanForMsg' :: String -> Buffer -> PacketParse
+            -> (ParseRes, Buffer, PacketParse)
+scanForMsg' xs buff pp' =
+  let buff' = buff ++ xs
+      drpCnt = length buff' - maxBuffLen
+  in if drpCnt > 0
+     then scanForMsg' [] (drop drpCnt buff') PPOut
+     else splitMsg buff' pp'
+  where
+    splitMsg buff'' pp = case (splitOn sep buff'', pp) of
+      (a@(_ : _ : _), PPIn) -> (PRData $ init a, last a, pp)
+      (a@(m : _ : _), PPOut) -> (PRData $ init $ tail a, last a, PPIn)
+      (m : _, PPOut) -> (PRNeedMoreData, drop (length m) buff'', PPOut)
+      (_, PPIn) -> (PRNeedMoreData, buff'',  PPIn)
+      ([], pp'') -> (PRNeedMoreData, [], pp'')
