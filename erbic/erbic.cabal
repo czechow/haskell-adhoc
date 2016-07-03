@@ -28,7 +28,9 @@ library
                      , network
                      , split
                      , random
+                     , text
                      , pretty-show
+                     , QuickCheck
   default-language:    Haskell2010
 
 executable erbic

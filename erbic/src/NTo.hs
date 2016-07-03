@@ -10,11 +10,14 @@ import Control.Exception
 import Network.Socket
 import Control.Monad
 import GHC.IO.Exception
-import Data.List.Split
+import Data.List.Split (splitOn)
 import Data.IORef
 import System.Random
 import GHC.IO (unsafeUnmask)
 import qualified Data.Set as S
+import Data.List (isInfixOf)
+import Test.QuickCheck
+
 
 type ErrMsg = String
 
@@ -215,8 +218,10 @@ data ParseRes = PRData [String]
               | PRNeedMoreData
               deriving Show
 
+type Msg = String
+
 scanForMsg' :: String -> Buffer -> PacketParse
-            -> (ParseRes, Buffer, PacketParse)
+            -> ([Msg], Buffer, PacketParse)
 scanForMsg' xs buff pp' =
   let buff' = buff ++ xs
       drpCnt = length buff' - maxBuffLen
@@ -225,8 +230,35 @@ scanForMsg' xs buff pp' =
      else splitMsg buff' pp'
   where
     splitMsg buff'' pp = case (splitOn sep buff'', pp) of
-      (a@(_ : _ : _), PPIn) -> (PRData $ init a, last a, pp)
-      (a@(m : _ : _), PPOut) -> (PRData $ init $ tail a, last a, PPIn)
-      (m : _, PPOut) -> (PRNeedMoreData, drop (length m) buff'', PPOut)
-      (_, PPIn) -> (PRNeedMoreData, buff'',  PPIn)
-      ([], pp'') -> (PRNeedMoreData, [], pp'')
+      (a@(_ : _ : _), PPIn) -> (init a, last a, pp)
+      (a@(m : _ : _), PPOut) -> (init $ tail a, last a, PPIn)
+      (m : _, PPOut) -> ([], drop (length m) buff'', PPOut)
+      (_, PPIn) -> ([], buff'',  PPIn)
+      ([], pp'') -> ([], [], pp'')
+
+
+prop_test2 :: Int -> Bool
+prop_test2 = \s -> s == s
+
+prop_sfm1 :: String -> String -> Bool
+prop_sfm1 xs buff = let (_, lo, _) = scanForMsg' xs buff PPOut
+                    in not $ sep `isInfixOf` lo
+
+newtype Input = Input String
+              deriving Show
+
+
+instance Arbitrary Input where
+  arbitrary = Input . concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']), return sep])
+
+
+genInput :: Gen String
+genInput = concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']), return sep])
+
+genInput2 =
+
+prop_sfm2 :: String -> String -> Bool
+
+
+main :: IO ()
+main = quickCheck prop_test2
