@@ -16,6 +16,9 @@ import System.Random
 import GHC.IO (unsafeUnmask)
 import qualified Data.Set as S
 import Data.List (isInfixOf)
+import Control.Monad.State
+import Control.Monad.Identity
+import qualified Control.Monad.Writer as MW
 import Test.QuickCheck
 
 
@@ -236,6 +239,31 @@ scanForMsg' xs buff pp' =
       (_, PPIn) -> ([], buff'',  PPIn)
       ([], pp'') -> ([], [], pp'')
 
+scanForMsg'' :: String
+             -> MW.WriterT [String] (State (Buffer, PacketParse)) [Msg]
+scanForMsg'' xs = do
+  (buff, pp) <- get
+  let buff' = buff ++ xs
+      drpCnt = length buff' - maxBuffLen
+  if drpCnt > 0
+    then do put (drop drpCnt buff', PPOut)
+            MW.tell ["Buffer size exceeded, truncated by " ++
+                     show drpCnt ++ " chars"]
+            scanForMsg'' []
+    else case (splitOn sep buff', pp) of
+      (a@(_ : _ : _), PPIn) ->  do put (last a, pp)
+                                   return $ init a
+      (a@(m : _ : _), PPOut) -> do put (last a, PPIn)
+                                   MW.tell ["Resynced after " ++
+                                            show (length m) ++ " chars"]
+                                   return $ init $ tail a
+      (m : _, PPOut) ->         do put (drop (length m) buff', PPOut)
+                                   MW.tell ["Sync lost, dropped " ++
+                                            show (length m) ++ " chars"]
+                                   return []
+      (_, _) ->                 do put (buff', pp)
+                                   return []
+
 
 prop_test2 :: Int -> Bool
 prop_test2 = \s -> s == s
@@ -244,20 +272,31 @@ prop_sfm1 :: String -> String -> Bool
 prop_sfm1 xs buff = let (_, lo, _) = scanForMsg' xs buff PPOut
                     in not $ sep `isInfixOf` lo
 
-newtype Input = Input String
-              deriving Show
+prop_sfm2 :: Property
+prop_sfm2 = forAll genInput2 $ \(xs, buff) ->
+  let (_, lo, _) = scanForMsg' xs buff PPOut
+  in not $ sep `isInfixOf` lo
 
+runScan :: String -> (Buffer, PacketParse)
+        -> (([Msg], [String]), (Buffer, PacketParse))
+runScan xs s = runState (MW.runWriterT $ scanForMsg'' xs) s
 
-instance Arbitrary Input where
-  arbitrary = Input . concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']), return sep])
-
+prop_sfm2' :: Property
+prop_sfm2' = forAll genInput3 $ \(xs, buff, pp) ->
+  let ((_, lg), (lo, _)) = runState (MW.runWriterT $ scanForMsg'' xs) $ (buff, pp)
+  in (not $ sep `isInfixOf` lo)
+     && null lg
 
 genInput :: Gen String
 genInput = concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']), return sep])
 
-genInput2 =
+genInput2 :: Gen (String, String)
+genInput2 = (,) <$> genInput <*> elements (map (:[]) ['a'..'z'])
 
-prop_sfm2 :: String -> String -> Bool
+genInput3 :: Gen (String, String, PacketParse)
+genInput3 = (,,) <$> genInput
+                 <*> elements (map (:[]) ['a'..'z'])
+                 <*> elements [PPIn, PPOut]
 
 
 main :: IO ()
