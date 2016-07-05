@@ -223,81 +223,56 @@ data ParseRes = PRData [String]
 
 type Msg = String
 
-scanForMsg' :: String -> Buffer -> PacketParse
-            -> ([Msg], Buffer, PacketParse)
-scanForMsg' xs buff pp' =
-  let buff' = buff ++ xs
-      drpCnt = length buff' - maxBuffLen
-  in if drpCnt > 0
-     then scanForMsg' [] (drop drpCnt buff') PPOut
-     else splitMsg buff' pp'
-  where
-    splitMsg buff'' pp = case (splitOn sep buff'', pp) of
-      (a@(_ : _ : _), PPIn) -> (init a, last a, pp)
-      (a@(m : _ : _), PPOut) -> (init $ tail a, last a, PPIn)
-      (m : _, PPOut) -> ([], drop (length m) buff'', PPOut)
-      (_, PPIn) -> ([], buff'',  PPIn)
-      ([], pp'') -> ([], [], pp'')
 
-scanForMsg'' :: String
-             -> MW.WriterT [String] (State (Buffer, PacketParse)) [Msg]
+data ScanData = ScanData { leftOver :: Buffer
+                         , parseState :: PacketParse
+                         , overrunCnt :: Int
+                         , syncCnt :: Int }
+              deriving Show
+
+scanForMsg'' :: String -> State ScanData [Msg]
 scanForMsg'' xs = do
-  (buff, pp) <- get
+  sd@(ScanData buff pp oCnt sCnt) <- get
   let buff' = buff ++ xs
       drpCnt = length buff' - maxBuffLen
   if drpCnt > 0
-    then do put (drop drpCnt buff', PPOut)
-            MW.tell ["Buffer size exceeded, truncated by " ++
-                     show drpCnt ++ " chars"]
+    then do put sd { leftOver = (drop drpCnt buff')
+                   , parseState = PPOut
+                   , overrunCnt = (succ oCnt) }
             scanForMsg'' []
     else case (splitOn sep buff', pp) of
-      (a@(_ : _ : _), PPIn) ->  do put (last a, pp)
-                                   return $ init a
-      (a@(m : _ : _), PPOut) -> do put (last a, PPIn)
-                                   MW.tell ["Resynced after " ++
-                                            show (length m) ++ " chars"]
+      (a@(_ : _ : _), PPIn) -> do put sd { leftOver = last a }
+                                  return $ init a
+      (a@(_ : _ : _), PPOut) -> do put sd { leftOver = last a
+                                          , parseState = PPIn
+                                          , syncCnt = succ sCnt }
                                    return $ init $ tail a
-      (m : _, PPOut) ->         do put (drop (length m) buff', PPOut)
-                                   MW.tell ["Sync lost, dropped " ++
-                                            show (length m) ++ " chars"]
-                                   return []
-      (_, _) ->                 do put (buff', pp)
-                                   return []
+      (m : _, PPOut) -> do put sd { leftOver = drop (length m) buff' }
+                           return []
+      (_, _) -> do put sd { leftOver = buff' }
+                   return []
 
 
-prop_test2 :: Int -> Bool
-prop_test2 = \s -> s == s
+runScan :: String -> ScanData -> ([Msg], ScanData)
+runScan xs s = runState (scanForMsg'' xs) s
 
-prop_sfm1 :: String -> String -> Bool
-prop_sfm1 xs buff = let (_, lo, _) = scanForMsg' xs buff PPOut
-                    in not $ sep `isInfixOf` lo
-
-prop_sfm2 :: Property
-prop_sfm2 = forAll genInput2 $ \(xs, buff) ->
-  let (_, lo, _) = scanForMsg' xs buff PPOut
+prop_1 :: Property
+prop_1 = forAll genInput3 $ \(xs, buff, pp) ->
+  let (_, (ScanData lo _ _ _)) = runScan xs (ScanData buff pp 0 0)
   in not $ sep `isInfixOf` lo
 
-runScan :: String -> (Buffer, PacketParse)
-        -> (([Msg], [String]), (Buffer, PacketParse))
-runScan xs s = runState (MW.runWriterT $ scanForMsg'' xs) s
-
-prop_sfm2' :: Property
-prop_sfm2' = forAll genInput3 $ \(xs, buff, pp) ->
-  let ((_, lg), (lo, _)) = runState (MW.runWriterT $ scanForMsg'' xs) $ (buff, pp)
-  in (not $ sep `isInfixOf` lo)
-     && null lg
-
 genInput :: Gen String
-genInput = concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']), return sep])
+genInput = concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']),
+                                     return sep])
 
 genInput2 :: Gen (String, String)
 genInput2 = (,) <$> genInput <*> elements (map (:[]) ['a'..'z'])
 
 genInput3 :: Gen (String, String, PacketParse)
 genInput3 = (,,) <$> genInput
-                 <*> elements (map (:[]) ['a'..'z'])
+                 <*> genInput
                  <*> elements [PPIn, PPOut]
 
 
-main :: IO ()
-main = quickCheck prop_test2
+-- main :: IO ()
+-- main = quickCheck prop_sfm2'
