@@ -15,7 +15,7 @@ import Data.IORef
 import System.Random
 import GHC.IO (unsafeUnmask)
 import qualified Data.Set as S
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, intercalate)
 import Control.Monad.State
 import Control.Monad.Identity
 import qualified Control.Monad.Writer as MW
@@ -230,6 +230,9 @@ data ScanData = ScanData { leftOver :: Buffer
                          , syncCnt :: Int }
               deriving Show
 
+mkScanData :: Buffer -> PacketParse -> ScanData
+mkScanData buff pp = ScanData buff pp 0 0
+
 scanForMsg'' :: String -> State ScanData [Msg]
 scanForMsg'' xs = do
   sd@(ScanData buff pp oCnt sCnt) <- get
@@ -258,12 +261,30 @@ runScan xs s = runState (scanForMsg'' xs) s
 
 prop_1 :: Property
 prop_1 = forAll genInput3 $ \(xs, buff, pp) ->
-  let (_, (ScanData lo _ _ _)) = runScan xs (ScanData buff pp 0 0)
-  in not $ sep `isInfixOf` lo
+  let (res, (ScanData lo _ _ _)) = runScan xs $ mkScanData buff pp
+  in (not $ sep `isInfixOf` lo)
+     &&
+     (not $ sep `isInfixOf` concat res)
+
+prop_2 :: Property
+prop_2 = forAll genInput3 $ \(xs, buff, pp) ->
+  let (rss, (ScanData lo _ _ _ )) = runScan xs $ mkScanData buff pp
+  in length (concat rss) + length lo <= length xs + length buff
+
+prop_3 :: Property
+prop_3 = forAll genNoOverflow $ \(xs, buff) ->
+  let (rss, (ScanData lo _ _ _)) = runScan xs $ mkScanData buff PPIn
+  in concat (map (++sep) rss) ++ lo == buff ++ xs
 
 genInput :: Gen String
 genInput = concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']),
                                      return sep])
+
+genNoOverflow :: Gen (String, String)
+genNoOverflow = do
+  xs <- resize maxBuffLen genInput
+  p <- choose (0, length xs)
+  return $ splitAt p xs
 
 genInput2 :: Gen (String, String)
 genInput2 = (,) <$> genInput <*> elements (map (:[]) ['a'..'z'])
