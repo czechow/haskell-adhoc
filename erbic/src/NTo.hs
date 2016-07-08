@@ -267,14 +267,27 @@ prop_1 = forAll genInput3 $ \(xs, buff, pp) ->
      (not $ sep `isInfixOf` concat res)
 
 prop_2 :: Property
-prop_2 = forAll genInput3 $ \(xs, buff, pp) ->
-  let (rss, (ScanData lo _ _ _ )) = runScan xs $ mkScanData buff pp
-  in length (concat rss) + length lo <= length xs + length buff
+prop_2 = forAll genNoOverflow $ \(xs, buff) ->
+  let (rss, (ScanData lo _ _ _)) = runScan xs $ mkScanData buff PPIn
+  in concat (map (++sep) rss) ++ lo == buff ++ xs
 
 prop_3 :: Property
 prop_3 = forAll genNoOverflow $ \(xs, buff) ->
-  let (rss, (ScanData lo _ _ _)) = runScan xs $ mkScanData buff PPIn
-  in concat (map (++sep) rss) ++ lo == buff ++ xs
+  let (rss, (ScanData lo _ _ sc)) = runScan xs $ mkScanData buff PPOut
+  in concat rss ++ lo
+     ==
+     (concat . tail $ splitOn sep (buff ++ xs))
+     &&
+     sc == if sep `isInfixOf` (buff ++ xs) then 1 else 0
+
+prop_4 :: Property
+prop_4 = forAll genOverflow $ \(xs, buff, pp) ->
+  let (rss, (ScanData lo _ ovr sc)) = runScan xs $ mkScanData buff pp
+      input' = drop ((length $ buff ++ xs) - maxBuffLen) (buff ++ xs)
+      (rss', (ScanData lo' _ _ sc')) = runScan input' $ mkScanData "" PPOut
+  in ovr == 1 && sc == sc' &&
+     rss == rss' && lo == lo'
+
 
 genInput :: Gen String
 genInput = concat <$> listOf (oneof [elements (map (:[]) ['a'..'z']),
@@ -285,6 +298,16 @@ genNoOverflow = do
   xs <- resize maxBuffLen genInput
   p <- choose (0, length xs)
   return $ splitAt p xs
+
+genOverflow :: Gen (String, String, PacketParse)
+genOverflow = do
+  xs <- resize (maxBuffLen + 1) genInput
+  p <- choose (0, length xs)
+  pp <- elements [PPIn, PPOut]
+  if length xs <= maxBuffLen
+    then genOverflow
+    else let (x, y) = splitAt p xs
+         in return (x, y, pp)
 
 genInput2 :: Gen (String, String)
 genInput2 = (,) <$> genInput <*> elements (map (:[]) ['a'..'z'])
