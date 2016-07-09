@@ -62,26 +62,6 @@ data SockReadRes = SRRData String
 --         EOF -> return SRRClosed
 --         _ -> return $ SRRErr maybeErrCode (show e)
 
--- srvConn :: MVar (S.Set ThreadId) -> Socket -> IO ()
--- srvConn mvThreads s =
---   mask $ \restoreMask ->
---     do putStrLn $ "srvConn: Accepting requests"
---        (s', _) <- accept s
---        tid <- forkFinally (thrBody s' restoreMask)
---                           (thrHandler s')
---        putStrLn $ "srvConn: new connection served by thread " ++ show tid
---          where
---            thrBody s'' restoreMask'' = do
---              uninterruptibleMask_ $
---                modifyMVar_ mvThreads
---                            (\ts -> flip S.insert ts <$> myThreadId)
---              restoreMask'' $ doServeConn s''
---            thrHandler s'' = \_ -> do
---              close s''
---              uninterruptibleMask_ $
---                modifyMVar_ mvThreads
---                            (\ts -> flip S.delete ts <$> myThreadId)
---              putStrLn $ "Sock closed " ++ show s''
 
 nset :: IO (MVar (S.Set ThreadId))
 nset = newMVar S.empty
@@ -173,10 +153,11 @@ doServeConn2 s =
   where
     doServeConn2' sd' = do
       str <- ssRead s
-      let (res, sd'') = runScan str sd'
+      let (res, sd'') = runScan (filter nonCRLF str) sd'
       putStrLn $ "Read: [" ++ intercalate "|" res ++ "]"
       -- here we should progress with destination => like channel or sth
       doServeConn2' sd''
+    nonCRLF x = x /= '\n' && x /= '\r'
 
 
 
@@ -237,7 +218,6 @@ runScan :: String -> ScanData -> ([Msg], ScanData)
 runScan xs s = runState (scanForMsg'' xs) s
 
 
--- FIXME: perhaps separate properties onto one-thing checkers...
 
 prop_1 :: Property
 prop_1 = forAll genInput3 $ \(xs, buff, pp) ->
@@ -252,7 +232,8 @@ prop_2 = forAll genNoOverflow $ \(xs, buff) ->
   in concat (map (++sep) rss) ++ lo == buff ++ xs
 
 prop_3 :: Property
-prop_3 = forAll genNoOverflow $ \(xs, buff) ->
+prop_3 =
+  forAll genNoOverflow $ \(xs, buff) ->
   let (rss, (ScanData lo _ _ sc)) = runScan xs $ mkScanData buff PPOut
   in concat rss ++ lo == (concat . tail $ splitOn sep (buff ++ xs))
      &&
@@ -267,16 +248,9 @@ prop_4 = forAll genOverflow $ \(xs, buff, pp) ->
      rss == rss' && lo == lo'
 
 
--- Now looped reader test
 {-
   Input IO => runScan => output msgs => do something with them
-
-  Like "do serve connection"
-
-
-
 -}
-
 
 
 
