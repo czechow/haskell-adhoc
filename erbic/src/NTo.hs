@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module NTo where
 
 
@@ -64,37 +62,37 @@ data SockReadRes = SRRData String
 --         EOF -> return SRRClosed
 --         _ -> return $ SRRErr maybeErrCode (show e)
 
-srvConn :: MVar (S.Set ThreadId) -> Socket -> IO ()
-srvConn mvThreads s =
-  mask $ \restoreMask ->
-    do putStrLn $ "srvConn: Accepting requests"
-       (s', _) <- accept s
-       tid <- forkFinally (thrBody s' restoreMask)
-                          (thrHandler s')
-       putStrLn $ "srvConn: new connection served by thread " ++ show tid
-         where
-           thrBody s'' restoreMask'' = do
-             uninterruptibleMask_ $
-               modifyMVar_ mvThreads
-                           (\ts -> flip S.insert ts <$> myThreadId)
-             restoreMask'' $ doServeConn s''
-           thrHandler s'' = \_ -> do
-             close s''
-             uninterruptibleMask_ $
-               modifyMVar_ mvThreads
-                           (\ts -> flip S.delete ts <$> myThreadId)
-             putStrLn $ "Sock closed " ++ show s''
+-- srvConn :: MVar (S.Set ThreadId) -> Socket -> IO ()
+-- srvConn mvThreads s =
+--   mask $ \restoreMask ->
+--     do putStrLn $ "srvConn: Accepting requests"
+--        (s', _) <- accept s
+--        tid <- forkFinally (thrBody s' restoreMask)
+--                           (thrHandler s')
+--        putStrLn $ "srvConn: new connection served by thread " ++ show tid
+--          where
+--            thrBody s'' restoreMask'' = do
+--              uninterruptibleMask_ $
+--                modifyMVar_ mvThreads
+--                            (\ts -> flip S.insert ts <$> myThreadId)
+--              restoreMask'' $ doServeConn s''
+--            thrHandler s'' = \_ -> do
+--              close s''
+--              uninterruptibleMask_ $
+--                modifyMVar_ mvThreads
+--                            (\ts -> flip S.delete ts <$> myThreadId)
+--              putStrLn $ "Sock closed " ++ show s''
 
 nset :: IO (MVar (S.Set ThreadId))
 nset = newMVar S.empty
 
 
-doServeConn :: Socket -> IO ()
-doServeConn s = do
-  ms <- getMaskingState
-  putStrLn $ "doServerConn: Mask state is " ++  show ms
-  recv s 16 >>= putStrLn
-  doServeConn s
+-- doServeConn :: Socket -> IO ()
+-- doServeConn s = do
+--   ms <- getMaskingState
+--   putStrLn $ "doServerConn: Mask state is " ++  show ms
+--   recv s 16 >>= putStrLn
+--   doServeConn s
 
 
 doAll :: MVar (S.Set ThreadId) -> Int -> IO ()
@@ -107,35 +105,10 @@ doAll mv n = bracket
     loop :: Int -> Socket -> IO ()
     loop n' s
       | n' <= 0 = return ()
-      | otherwise = do _ <- srvConn mv s
+      | otherwise = do _ <- srvConn2 mv s
                        loop (pred n') s
 
 
-mvInt :: IO (MVar Int)
-mvInt = newMVar 0
-
-
-conc :: MVar Int -> IO ()
-conc mv = do
-  modifyMVar_ mv $ return . const 0
-  conc mv
-
-
-isCloseIntr :: MVar Int -> IO ()
-isCloseIntr mv = do
-  s <- openSock
-  putStrLn $ "Repeatedly closing socket"
-  mask_ $ loop s
-    where
-      loop s' = do close s'
-                   uninterruptibleMask $ \_ -> modifyMVar_ mv $ return . succ
-                   loop s'
-
-nonIntr :: IO ()
-nonIntr = do
-  mask_ (do putStrLn "Sleep started"
-            threadDelay $ 10 * 1000 * 1000
-            putStrLn "Sleep stopped")
 
 
 class SockService a where
@@ -173,7 +146,7 @@ newMS :: MockSocket
 newMS = MockSocket ()
 
 ------------------------
-srvConn2 :: SockService ss => MVar (S.Set ThreadId) -> ss -> IO ()
+srvConn2 :: SockService a => MVar (S.Set ThreadId) -> a -> IO ()
 srvConn2 mvThreads s =
   mask $ \restoreMask ->
     do putStrLn $ "srvConn: Accepting requests"
@@ -195,11 +168,15 @@ srvConn2 mvThreads s =
 
 
 doServeConn2 :: SockService ss => ss -> IO ()
-doServeConn2 s = do
-  ms <- getMaskingState
-  putStrLn $ "doServerConn: Mask state is " ++  show ms
-  ssRead s >>= putStrLn
-  doServeConn2 s
+doServeConn2 s =
+  doServeConn2' $ mkScanData "" PPIn
+  where
+    doServeConn2' sd' = do
+      str <- ssRead s
+      let (res, sd'') = runScan str sd'
+      putStrLn $ "Read: [" ++ intercalate "|" res ++ "]"
+      -- here we should progress with destination => like channel or sth
+      doServeConn2' sd''
 
 
 
@@ -259,6 +236,9 @@ scanForMsg'' xs = do
 runScan :: String -> ScanData -> ([Msg], ScanData)
 runScan xs s = runState (scanForMsg'' xs) s
 
+
+-- FIXME: perhaps separate properties onto one-thing checkers...
+
 prop_1 :: Property
 prop_1 = forAll genInput3 $ \(xs, buff, pp) ->
   let (res, (ScanData lo _ _ _)) = runScan xs $ mkScanData buff pp
@@ -274,9 +254,7 @@ prop_2 = forAll genNoOverflow $ \(xs, buff) ->
 prop_3 :: Property
 prop_3 = forAll genNoOverflow $ \(xs, buff) ->
   let (rss, (ScanData lo _ _ sc)) = runScan xs $ mkScanData buff PPOut
-  in concat rss ++ lo
-     ==
-     (concat . tail $ splitOn sep (buff ++ xs))
+  in concat rss ++ lo == (concat . tail $ splitOn sep (buff ++ xs))
      &&
      sc == if sep `isInfixOf` (buff ++ xs) then 1 else 0
 
@@ -287,6 +265,21 @@ prop_4 = forAll genOverflow $ \(xs, buff, pp) ->
       (rss', (ScanData lo' _ _ sc')) = runScan input' $ mkScanData "" PPOut
   in ovr == 1 && sc == sc' &&
      rss == rss' && lo == lo'
+
+
+-- Now looped reader test
+{-
+  Input IO => runScan => output msgs => do something with them
+
+  Like "do serve connection"
+
+
+
+-}
+
+
+
+
 
 
 genInput :: Gen String
@@ -301,7 +294,7 @@ genNoOverflow = do
 
 genOverflow :: Gen (String, String, PacketParse)
 genOverflow = do
-  xs <- resize (maxBuffLen + 1) genInput
+  xs <- resize (5 * maxBuffLen) genInput
   p <- choose (0, length xs)
   pp <- elements [PPIn, PPOut]
   if length xs <= maxBuffLen
@@ -318,5 +311,7 @@ genInput3 = (,,) <$> genInput
                  <*> elements [PPIn, PPOut]
 
 
--- main :: IO ()
--- main = quickCheck prop_sfm2'
+main :: IO ()
+main = do
+  ts <- nset
+  doAll ts 2
