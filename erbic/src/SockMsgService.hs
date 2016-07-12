@@ -14,14 +14,16 @@ import SockMsg
 type Host = String
 
 -- Main service (aka factory method)
+-- FIXME: this is not async exceptions safe,
+-- work out a better strategy of spawning/signaling thread termination
 runSockMsgService :: BoundedChan String ->
                      IO (MVar (Maybe ThreadId), MVar (S.Set ThreadId))
 runSockMsgService ch = do
   mvThreads <- newMVar S.empty
-  mvTid <- newMVar Nothing
-  _ <- forkFinally (do modifyMVar_ mvTid $ \_ -> Just <$> myThreadId
-                       srvSockMsgs "127.0.0.1" 2222 mvThreads ch)
-                   (\_ -> modifyMVar_ mvTid $ \_ -> return Nothing)
+  mvTid <- newEmptyMVar :: IO (MVar (Maybe ThreadId))
+  tid <- forkFinally (srvSockMsgs "127.0.0.1" 2222 mvThreads ch)
+                     (\_ -> modifyMVar_ mvTid $ \_ -> return Nothing)
+  putMVar mvTid $ Just tid
   return (mvTid, mvThreads)
 
 
@@ -30,10 +32,10 @@ srvSockMsgs :: Host -> PortNumber -> MVar (S.Set ThreadId) -> BoundedChan String
 srvSockMsgs host port mvThreads ch =
   bracket (ssOpen host port :: IO Socket)
           ssClose
-          loop
+          serve
   where
-    loop s = do srvSockConn mvThreads s ch
-                loop s
+    serve s = do srvSockConn mvThreads s ch
+                 serve s
 
 
 srvSockConn :: (SockService a, ChannelService b) =>

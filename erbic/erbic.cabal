@@ -44,6 +44,8 @@ executable erbic
   build-depends:       base
                      , erbic
                      , mtl
+                     , containers
+                     , BoundedChan
   default-language:    Haskell2010
 
 test-suite erbic-test

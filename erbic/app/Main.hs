@@ -6,11 +6,16 @@
 {-# LANGUAGE FunctionalDependencies #-}
 module Main where
 
+
 import Data.Typeable
 import Data.Data
+import qualified Data.Set as S
 import Control.Monad.State
+import Control.Concurrent.BoundedChan
+import Control.Concurrent hiding (readChan)
+import Control.Exception
 
-import Httpd
+import SockMsgService
 
 
 data RFQ = RFQ Int String -- and many more...
@@ -134,7 +139,63 @@ fAll (i1, t1) (ps1, ps3) =
       (ns3, o2) = f3 (o1, t1) ps3
   in ((ns1, ns3), o2)
 
+
 main :: IO ()
 main = do
   putStrLn "Up and running"
-  Httpd.run
+  ch <- newBoundedChan 128 :: IO (BoundedChan String)
+  bracket (forkIO $ logger ch) (stopLogger) $ \_ ->
+    bracket (runSockMsgService ch) (stopSockMsgService) $ \_ ->
+    main'
+
+main' :: IO ()
+main' = do
+  putStrLn "Hit <Enter> to stop"
+  _ <- getLine
+  return ()
+
+
+logger :: BoundedChan String -> IO ()
+logger ch = forever $ do
+  msg <- readChan ch
+  putStrLn $ "[LOG]: " ++ msg
+
+stopSockMsgService :: (MVar (Maybe ThreadId), MVar (S.Set ThreadId)) -> IO ()
+stopSockMsgService (mv, mvs) =
+  sequence_ [stopSvcThread mv, stopConnThreads mvs]
+
+stopSvcThread :: MVar (Maybe ThreadId) -> IO ()
+stopSvcThread mv = do
+  mTid <- readMVar mv
+  case mTid of
+    Just tid -> do
+      putStrLn $ "Stopping SockMsgSvc thread " ++ show tid
+      killThread tid
+      spinLoop
+    Nothing -> return ()
+  putStrLn $ "SockMsgSvc thread stopped"
+  where
+    spinLoop = do
+      m <- readMVar mv
+      case m of
+        Just _ -> do threadDelay 1000
+                     spinLoop
+        Nothing -> return ()
+
+stopConnThreads :: MVar (S.Set ThreadId) -> IO ()
+stopConnThreads mvs = do
+  tids <- readMVar mvs
+  if (not $ S.null tids)
+    then do putStrLn $ "Stopping all connection threads: " ++
+                       show (S.toList tids)
+            mapM_ killThread $ S.toList tids
+            threadDelay 1000
+            stopConnThreads mvs
+    else putStrLn "All connection threads stopped"
+
+stopLogger :: ThreadId -> IO ()
+stopLogger tid = do
+  putStrLn $ "Stopping logger thread " ++ show tid
+  killThread tid
+  threadDelay 1000
+  putStrLn $ "Logger thread stopped"
