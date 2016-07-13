@@ -1,13 +1,13 @@
 {-# LANGUAGE FlexibleInstances #-}
 
-module SockMsg where
+module Erbic.In.SockService.SockMsg where
 
 
 import Control.Concurrent.BoundedChan
 import Data.List (intercalate)
 
-import Sock
-import ScanMsg
+import Erbic.In.SockService.Sock
+import Erbic.Data.Msg.ScanMsg
 
 
 -- FIXME: perhaps the name should be more generic???

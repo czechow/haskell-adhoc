@@ -1,4 +1,4 @@
-module ScanMsg
+module Erbic.Data.Msg.ScanMsg
        ( mkScanData
        , runScan
        , ScanData(ScanData)

@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-import qualified ScanMsgProp
+import qualified Erbic.Data.Msg.ScanMsgProp as ScanMsgProp
 
 import System.Exit
 

@@ -1,4 +1,4 @@
-module SockMsgService where
+module Erbic.In.SockService.SockMsgService where
 
 
 import Network.Socket
@@ -7,8 +7,8 @@ import Control.Exception
 import qualified Data.Set as S
 import Control.Concurrent.BoundedChan
 
-import Sock
-import SockMsg
+import Erbic.In.SockService.Sock
+import Erbic.In.SockService.SockMsg
 
 
 type Host = String

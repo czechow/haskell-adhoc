@@ -1,9 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScanMsgProp where
+module Erbic.Data.Msg.ScanMsgProp where
 
 
-import ScanMsg
+import Erbic.Data.Msg.ScanMsg
 
 import Data.List (isInfixOf)
 import Data.List.Split (splitOn)

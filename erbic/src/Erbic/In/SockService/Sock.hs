@@ -1,4 +1,4 @@
-module Sock where
+module Erbic.In.SockService.Sock where
 
 
 import Control.Exception

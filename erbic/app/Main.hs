@@ -15,7 +15,7 @@ import Control.Concurrent.BoundedChan
 import Control.Concurrent hiding (readChan)
 import Control.Exception
 
-import SockMsgService
+import Erbic.In.SockService.SockMsgService
 
 
 data RFQ = RFQ Int String -- and many more...
