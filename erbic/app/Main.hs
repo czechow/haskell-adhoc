@@ -16,6 +16,7 @@ import Control.Concurrent hiding (readChan)
 import Control.Exception
 
 import Erbic.In.SockService.SockMsgService
+import Erbic.In.ConsoleService.ConsoleMsgService
 
 
 data RFQ = RFQ Int String -- and many more...
@@ -146,12 +147,13 @@ main = do
   ch <- newBoundedChan 128 :: IO (BoundedChan String)
   bracket (forkIO $ logger ch) (stopLogger) $ \_ ->
     bracket (runSockMsgService ch) (stopSockMsgService) $ \_ ->
-    main'
+    bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(_, mv) ->
+    main' mv
 
-main' :: IO ()
-main' = do
-  putStrLn "Hit <Enter> to stop"
-  _ <- getLine
+main' :: MVar () -> IO ()
+main' mv = do
+  putStrLn "Enter <quit> to stop"
+  _ <- takeMVar mv
   return ()
 
 
@@ -159,6 +161,10 @@ logger :: BoundedChan String -> IO ()
 logger ch = forever $ do
   msg <- readChan ch
   putStrLn $ "[LOG]: " ++ msg
+
+stopConsoleMsgService :: (ThreadId, MVar ()) -> IO ()
+stopConsoleMsgService (tid, _) = do
+  killThread tid
 
 stopSockMsgService :: (MVar (Maybe ThreadId), MVar (S.Set ThreadId)) -> IO ()
 stopSockMsgService (mv, mvs) =
