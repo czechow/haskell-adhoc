@@ -147,13 +147,14 @@ main = do
   ch <- newBoundedChan 128 :: IO (BoundedChan String)
   bracket (forkIO $ logger ch) (stopLogger) $ \_ ->
     bracket (runSockMsgService ch) (stopSockMsgService) $ \_ ->
-    bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(_, mv) ->
-    main' mv
+    bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(cstid,  mv) ->
+    main' cstid mv
 
-main' :: MVar () -> IO ()
-main' mv = do
+main' :: ThreadId -> MVar () -> IO ()
+main' tid mv = do
   putStrLn "Enter <quit> to stop"
   _ <- takeMVar mv
+  putStrLn $ "Console thread stopped " ++ show tid
   return ()
 
 
@@ -164,6 +165,7 @@ logger ch = forever $ do
 
 stopConsoleMsgService :: (ThreadId, MVar ()) -> IO ()
 stopConsoleMsgService (tid, _) = do
+  putStrLn $ "Stopping console service " ++ show tid
   killThread tid
 
 stopSockMsgService :: (MVar (Maybe ThreadId), MVar (S.Set ThreadId)) -> IO ()
