@@ -3,5 +3,5 @@
 Various stuff I try to write in Haskell while learning this
 beautiful language.
 
-Haskel rocks!
+Haskell rocks!
 
