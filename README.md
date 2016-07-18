@@ -1,5 +1,7 @@
 # haskell-adhoc
 
 Various stuff I try to write in Haskell while learning this
-beautiful language :-)
+beautiful language.
+
+Haskel rocks!
 
