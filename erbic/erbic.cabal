@@ -19,9 +19,11 @@ library
                      , Adhoc
                      , Httpd
                      , Erbic.Data.Msg.ScanMsg
+                     , Erbic.IO.Fork
                      , Erbic.In.SockService.Sock
                      , Erbic.In.SockService.SockMsg
                      , Erbic.In.SockService.SockMsgService
+                     , Erbic.In.SockService.SockMsgService2
                      , Erbic.In.ConsoleService.ConsoleMsgService
                      , To
   build-depends:       base >= 4.7 && < 5
@@ -47,6 +49,7 @@ executable erbic
                      , mtl
                      , containers
                      , BoundedChan
+                     , network
   default-language:    Haskell2010
 
 test-suite erbic-test
