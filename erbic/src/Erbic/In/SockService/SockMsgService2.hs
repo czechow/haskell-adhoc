@@ -8,9 +8,13 @@ module Erbic.In.SockService.SockMsgService2 where
 import Control.Concurrent
 import Control.Exception
 import Network.Socket
-import Data.Map.Strict as M
+import qualified Data.Map.Strict as M
 import GHC.IO.Exception
 import Erbic.IO.Fork
+
+import Control.Concurrent.BoundedChan
+import Data.List (intercalate)
+import Erbic.Data.Msg.ScanMsg
 
 
 data SSData a = SSData { name :: String
@@ -24,6 +28,7 @@ data ReadRes = RRData String
              | RRError (Maybe Int) ErrMsg
              deriving Show
 
+-- FIXME: how to incorporate logging facility?
 
 class Show s => Service s where
   ssOpen :: IO s
@@ -83,13 +88,27 @@ class Show s => Service s where
                 putStrLn $ "New connection from " ++ show sa ++
                            " on " ++ show s ++
                            " served in " ++ show tid
-                doSrv)
+                doMsgReception s)
             (do ssClose s
                 tid <- myThreadId
                 putStrLn $ "Closed connection on " ++ show s ++
                            " in " ++ show tid)
-      where
-        doSrv = threadDelay $ 10 * 1000 * 1000
+
+-- FIXME: should inform on result (if connection is closed/broken)
+doMsgReception :: (Service ss) => ss -> IO ()
+doMsgReception s =
+  orchRec $ mkScanData "" PPIn
+  where
+    orchRec sd' = do
+      str <- ssRead s 16
+      case str of
+        RRData data' -> do let (msgs, sd'') = runScan (filter nonCRLF data') sd'
+                           putStrLn $ "Read: [" ++ intercalate "|" msgs ++ "]"
+                           orchRec sd''
+        RRClosed -> putStrLn "Connection closed"
+        RRError _ errMsg -> putStrLn $ "Error on connection: " ++ errMsg
+    nonCRLF x = x /= '\n' && x /= '\r'
+
 
 -------------------------------------------------------------------------------
 --                                Instances
