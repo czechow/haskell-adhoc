@@ -12,13 +12,17 @@ import Erbic.IO.Fork
 import qualified Erbic.In.SockService.SockMsgService2 as SMS
 import Erbic.In.ConsoleService.ConsoleMsgService
 
+delay :: Int -> IO a -> IO a
+delay us action = do
+  threadDelay us
+  action
 
 main :: IO ()
 main = do
   putStrLn "Up and running"
   ch <- newBoundedChan 128 :: IO (BoundedChan String)
-  ssd <- SMS.newSS "X" 12 :: IO (SMS.SSData Socket)
-  bracket (tfork $ logger ch) (stopThread 0) $ \_ ->
+  ssd <- SMS.newSS "X" 12 ch :: IO (SMS.SSData Socket)
+  bracket (tfork $ logger ch) (delay 1000 . stopThread 0) $ \_ ->
     bracket (SMS.startSS ssd) (\ssd' -> SMS.stopSS 0 ssd') $ \_ ->
     bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(cstid, mv) ->
     do
@@ -38,7 +42,7 @@ stopConsoleMsgService (tid, _) = do
   putStrLn $ "Stopping console service " ++ show tid
   killThread tid
 
-
+-- make sure we spit out all the messages
 stopLogger :: ThreadId -> IO ()
 stopLogger tid = do
   putStrLn $ "Stopping logger thread " ++ show tid

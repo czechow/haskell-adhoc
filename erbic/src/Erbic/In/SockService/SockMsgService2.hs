@@ -5,7 +5,7 @@
 module Erbic.In.SockService.SockMsgService2 where
 
 
-import Control.Concurrent
+import Control.Concurrent hiding (writeChan)
 import Control.Exception
 import Network.Socket
 import qualified Data.Map.Strict as M
@@ -18,6 +18,7 @@ import Erbic.Data.Msg.ScanMsg
 
 
 data SSData a = SSData { name :: String
+                       , logger :: BoundedChan String
                        , svcData :: Maybe (ThreadId, MVar ())
                        , connData :: MVar (M.Map ThreadId (MVar ())) }
 
@@ -36,10 +37,10 @@ class Show s => Service s where
   ssAccept :: s -> IO (s, String)
   ssRead :: s -> Int -> IO ReadRes
 
-  newSS :: HostName -> Int -> IO (SSData s)
-  newSS _ _ = do
+  newSS :: HostName -> Int -> BoundedChan String -> IO (SSData s)
+  newSS _ _ ch = do
     mvConnData <- newMVar M.empty
-    return $ SSData "SockSrvName" Nothing mvConnData
+    return $ SSData "SockSrvName" ch Nothing mvConnData
 
 
   startSS :: SSData s -> IO (SSData s)
@@ -54,13 +55,20 @@ class Show s => Service s where
   stopSS t ssd =
     mask_ $ case svcData ssd of
       Just (tid, mv) -> do
-        putStrLn $ "Stopping service " ++ name ssd ++ " " ++ show tid
+        --putStrLn $ "Stopping service " ++ name ssd ++ " " ++ show tid
+        writeChan (logger ssd) $
+                  "Stopping service " ++ name ssd ++ " " ++ show tid
         stopThread t (tid, mv)
-        putStrLn $ "Service thread " ++ show tid ++ " stopped"
+        writeChan (logger ssd) $
+                  "Service thread " ++ show tid ++ " stopped"
+        --putStrLn $ "Service thread " ++ show tid ++ " stopped"
         tidsMvsMap <- readMVar $ connData ssd
-        putStrLn $ "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
+        writeChan (logger ssd) $
+                  "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
+        --putStrLn $ "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
         stopThreadPool t $ connData ssd
-        putStrLn $ "All connections stopped"
+        writeChan (logger ssd) $ "All connections stopped"
+        --putStrLn $ "All connections stopped"
       Nothing -> do
         putStrLn $ "Service was not started, nothing to stop"
 
