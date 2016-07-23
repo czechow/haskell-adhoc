@@ -14,45 +14,59 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
 import Control.Concurrent.Chan
-
-newtype Dollars a = Dollars a deriving (Eq, Show, Num)
-
--- s will be datatype supporting logger
-class Logger s where
-  lg :: s -> String -> IO ()
+import qualified Data.Text.IO as TIO
+import System.IO
+import Data.Text
 
 
-instance Logger (Chan String) where
-  lg ch s = writeChan ch s
+-- newtype HandleLoggerT m a = HandleLoggerT (ReaderT Handle m a)
 
 
+class MonadLogger m where
+    askLogger :: m (Text -> IO ())
 
-type App r a = (ReaderT r IO a)
-
-
-
-runApp :: App r a -> r -> IO a
-runApp app' x = runReaderT app' x
-
-
--- ReaderT r m a
-app :: Logger a => App a Int
-app = do
-  ch <- ask
-  liftIO $ lg ch "Wania"
-  return 13
+instance Monad m => MonadLogger (ReaderT Handle m) where
+  askLogger = do
+    handle <- ask
+    return $ TIO.hPutStrLn handle
 
 
--- safeLoadFile :: FilePath -> IO (Either IOException String)
--- safeLoadFile fp = (Right <$> readFile fp) `catch` \e -> return $ Left e
+-- Monad m =>
+-- MonadReader r m =>
 
-main :: IO ()
-main = do
-  putStrLn $ "Up and running"
---   x <- liftM (fmap length) (safeLoadFile "test.txt")
-  ch <- newChan
-  res <- runApp (app :: App (Chan String) Int) ch
-  chres <- readChan ch
-  putStrLn $ show res
-  putStrLn $ "Read from ch: [" ++ chres ++ "]"
-  return ()
+myApp :: String -> String
+myApp = undefined
+
+-- -- s will be datatype supporting logger
+-- class Monad s =>  MonadLogger s where
+--   lg :: s (String -> IO ())
+
+
+-- instance MonadLogger s where
+--   lg = undefined
+
+
+-- type App r a = ReaderT r IO a
+
+
+-- runApp :: App r a -> r -> IO a
+-- runApp app' x = runReaderT app' x
+
+
+-- -- ReaderT r m a
+-- app :: MonadLogger a => App a Int
+-- app = do
+--   ch <- ask
+--   liftIO $ lg ch "Wania"
+--   return 13
+
+
+-- main :: IO ()
+-- main = do
+--   putStrLn $ "Up and running"
+--   ch <- newChan
+--   res <- runApp (app :: App (Chan String) Int) ch
+--   chres <- readChan ch
+--   putStrLn $ show res
+--   putStrLn $ "Read from ch: [" ++ chres ++ "]"
+--   return ()

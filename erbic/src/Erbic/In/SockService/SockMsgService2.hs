@@ -55,22 +55,17 @@ class Show s => Service s where
   stopSS t ssd =
     mask_ $ case svcData ssd of
       Just (tid, mv) -> do
-        --putStrLn $ "Stopping service " ++ name ssd ++ " " ++ show tid
         writeChan (logger ssd) $
                   "Stopping service " ++ name ssd ++ " " ++ show tid
         stopThread t (tid, mv)
         writeChan (logger ssd) $
                   "Service thread " ++ show tid ++ " stopped"
-        --putStrLn $ "Service thread " ++ show tid ++ " stopped"
         tidsMvsMap <- readMVar $ connData ssd
         writeChan (logger ssd) $
                   "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
-        --putStrLn $ "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
         stopThreadPool t $ connData ssd
         writeChan (logger ssd) $ "All connections stopped"
-        --putStrLn $ "All connections stopped"
-      Nothing -> do
-        putStrLn $ "Service was not started, nothing to stop"
+      Nothing -> return ()
 
 
   isSSRunning :: SSData s -> IO Bool
