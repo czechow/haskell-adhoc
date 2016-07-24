@@ -19,15 +19,16 @@ import System.IO
 import Data.Text
 
 
--- newtype HandleLoggerT m a = HandleLoggerT (ReaderT Handle m a)
+newtype HandleLoggerT m a = HandleLoggerT (ReaderT Handle m a)
 
 
-class MonadLogger m where
+class Monad m => MonadLogger m where
     askLogger :: m (Text -> IO ())
 
-instance Monad m => MonadLogger (ReaderT Handle m) where
+--instance Monad m => MonadLogger (ReaderT Handle m) where
+instance Monad m => MonadLogger (HandleLoggerT m) where
   askLogger = do
-    handle <- ask
+    handle <- HandleLoggerT ask
     return $ TIO.hPutStrLn handle
 
 

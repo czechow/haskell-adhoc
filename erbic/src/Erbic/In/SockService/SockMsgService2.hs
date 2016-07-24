@@ -11,6 +11,7 @@ import Network.Socket
 import qualified Data.Map.Strict as M
 import GHC.IO.Exception
 import Erbic.IO.Fork
+import Data.IORef
 
 import Control.Concurrent.BoundedChan
 import Data.List (intercalate)
@@ -20,7 +21,7 @@ import Erbic.Data.Msg.ScanMsg
 data SSData a = SSData { name :: String
                        , logger :: BoundedChan String
                        , svcData :: Maybe (ThreadId, MVar ())
-                       , connData :: MVar (M.Map ThreadId (MVar ())) }
+                       , connData :: IORef (M.Map ThreadId (MVar ())) }
 
 type ErrMsg = String
 
@@ -39,7 +40,7 @@ class Show s => Service s where
 
   newSS :: HostName -> Int -> BoundedChan String -> IO (SSData s)
   newSS _ _ ch = do
-    mvConnData <- newMVar M.empty
+    mvConnData <- newIORef M.empty
     return $ SSData "SockSrvName" ch Nothing mvConnData
 
 
@@ -60,7 +61,7 @@ class Show s => Service s where
         stopThread t (tid, mv)
         writeChan (logger ssd) $
                   "Service thread " ++ show tid ++ " stopped"
-        tidsMvsMap <- readMVar $ connData ssd
+        tidsMvsMap <- readIORef $ connData ssd
         writeChan (logger ssd) $
                   "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
         stopThreadPool t $ connData ssd
@@ -76,7 +77,7 @@ class Show s => Service s where
     Nothing -> return False
 
 
-  ssSocketAccLoop :: s -> MVar (M.Map ThreadId (MVar ())) -> IO ()
+  ssSocketAccLoop :: s -> IORef (M.Map ThreadId (MVar ())) -> IO ()
   ssSocketAccLoop s mvTids = do
     bracketOnError (ssAccept s) (ssClose . fst) $
        \(s', sa') -> mask_ $ do _ <- tpfork (ssServeConnection s' sa') mvTids

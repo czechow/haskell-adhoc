@@ -2,6 +2,7 @@ module Erbic.In.ConsoleService.ConsoleMsgService where
 
 import Control.Concurrent hiding(writeList2Chan)
 import Control.Concurrent.BoundedChan
+import Control.Exception
 
 import Erbic.Data.Msg.ScanMsg
 
@@ -12,8 +13,8 @@ runConsoleMsgService ch = do
   return (tid, mv)
   where
     processing mv = do
-      orchRec $ mkScanData "" PPIn
-      putMVar mv ()
+      finally (orchRec $ mkScanData "" PPIn)
+              (putMVar mv ())
     orchRec sd = do
       ln <- getLine
       case ln of

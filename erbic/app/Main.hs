@@ -3,7 +3,7 @@ module Main where
 
 import Control.Monad.State
 import Control.Concurrent.BoundedChan
-import Control.Concurrent hiding (readChan, getChanContents)
+import Control.Concurrent hiding (writeChan, readChan, getChanContents)
 import Control.Exception
 
 
@@ -30,17 +30,18 @@ main = do
       _ <- readMVar mv
       putStrLn $ "Console thread stopped " ++ show cstid
       return ()
-
+  putStrLn $ "Main thread stopped"
 
 logger :: BoundedChan String -> IO ()
-logger ch = forever $ do
+logger ch = forever $ mask_ $ do
   msg <- readChan ch
   putStrLn $ "[LOG]: " ++ msg
 
 stopConsoleMsgService :: (ThreadId, MVar ()) -> IO ()
-stopConsoleMsgService (tid, _) = do
+stopConsoleMsgService (tid, mv) = do
   putStrLn $ "Stopping console service " ++ show tid
   killThread tid
+  readMVar mv
 
 -- make sure we spit out all the messages
 stopLogger :: BoundedChan String -> ThreadInfo -> IO ()
@@ -49,6 +50,13 @@ stopLogger ch ti = do
   stopThread 0 ti
   putStrLn $ "Logger thread stopped"
   putStrLn $ "Flushing logger queue"
-  msgs <- getChanContents ch
-  mapM_ (\m -> putStrLn $ "[LOG]: Flush: " ++ m) msgs
+  msgs <- rdChan
+  mapM_ (\m -> putStrLn $ "[LOG flush]: " ++ m) msgs
   putStrLn "Logger queue flushed"
+  where
+    rdChan :: IO [String]
+    rdChan = do
+      mMsg <- tryReadChan ch
+      case mMsg of
+        Just msg -> (msg :) <$> rdChan
+        Nothing -> return []

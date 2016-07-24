@@ -3,7 +3,7 @@ module Erbic.IO.Fork where
 import Control.Concurrent
 import Control.Exception
 import Data.Map.Strict as M
-
+import Data.IORef
 
 -- FIXME: implement stop timeouts (timeout composable?)
 
@@ -21,7 +21,7 @@ tfork action = do
   return (tid, mv)
 
 
-tpfork :: IO () -> MVar ThreadPoolInfo -> IO (ThreadId)
+tpfork :: IO () -> IORef ThreadPoolInfo -> IO (ThreadId)
 tpfork action mvTids =
   forkIOWithUnmask $ \unmask -> do bracket_ startup
                                             finish $
@@ -31,21 +31,20 @@ tpfork action mvTids =
       mv <- newEmptyMVar :: IO (MVar ())
       tid <- myThreadId
       uninterruptibleMask_ $
-        modifyMVar_ mvTids $ \tis -> return $ M.insert tid mv tis
+        modifyIORef' mvTids $ \tis -> M.insert tid mv tis
 
     finish = do
       tid <- myThreadId
-      uninterruptibleMask_ $
-        modifyMVar_ mvTids $ \tis -> case M.lookup tid tis of
-          Just mv -> do
-            putMVar mv ()
-            return $ M.delete tid tis
-          Nothing -> return tis
+      mmv <- atomicModifyIORef' mvTids $ \tis -> let ret = M.lookup tid tis
+                                                 in (M.delete tid tis, ret)
+      case mmv of
+        Just mv -> putMVar mv ()
+        Nothing -> return ()
 
 
-stopThreadPool :: TimeoutMs -> MVar ThreadPoolInfo -> IO ()
+stopThreadPool :: TimeoutMs -> IORef ThreadPoolInfo -> IO ()
 stopThreadPool _ mvThrInfos = do
-  tidsMvsMap <- readMVar mvThrInfos
+  tidsMvsMap <- readIORef mvThrInfos
   mapM_ killThread $ M.keys tidsMvsMap
   mapM_ readMVar $ M.elems tidsMvsMap
 
