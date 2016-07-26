@@ -12,10 +12,6 @@ import Erbic.IO.Fork
 import qualified Erbic.In.SockService.SockMsgService2 as SMS
 import Erbic.In.ConsoleService.ConsoleMsgService
 
-delay :: Int -> IO a -> IO a
-delay us action = do
-  threadDelay us
-  action
 
 main :: IO ()
 main = do

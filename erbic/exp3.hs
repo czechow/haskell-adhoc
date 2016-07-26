@@ -3,6 +3,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
+
 
 import Prelude hiding (log)
 
@@ -13,61 +15,33 @@ import Prelude hiding (log)
 import Control.Exception
 import Control.Monad
 import Control.Monad.Reader
+import Control.Monad.Identity
 import Control.Concurrent.Chan
 import qualified Data.Text.IO as TIO
 import System.IO
-import Data.Text
 
 
-newtype HandleLoggerT m a = HandleLoggerT (ReaderT Handle m a)
+
+class SockService ss where
+  ssRead :: ss -> String
+
+instance SockService Int where
+  ssRead x = "Text from sock service " ++ show x
+
+instance SockService String where
+  ssRead x = "Text here: " ++ x
 
 
-class Monad m => MonadLogger m where
-    askLogger :: m (Text -> IO ())
+type MyApp a = forall ss. SockService ss => ss -> Reader String a
 
---instance Monad m => MonadLogger (ReaderT Handle m) where
-instance Monad m => MonadLogger (HandleLoggerT m) where
-  askLogger = do
-    handle <- HandleLoggerT ask
-    return $ TIO.hPutStrLn handle
+startSvc :: MyApp [String]
+startSvc ss = do
+  st <- ask
+  return $ ["res", st, ssRead ss]
 
 
--- Monad m =>
--- MonadReader r m =>
 
-myApp :: String -> String
-myApp = undefined
-
--- -- s will be datatype supporting logger
--- class Monad s =>  MonadLogger s where
---   lg :: s (String -> IO ())
-
-
--- instance MonadLogger s where
---   lg = undefined
-
-
--- type App r a = ReaderT r IO a
-
-
--- runApp :: App r a -> r -> IO a
--- runApp app' x = runReaderT app' x
-
-
--- -- ReaderT r m a
--- app :: MonadLogger a => App a Int
--- app = do
---   ch <- ask
---   liftIO $ lg ch "Wania"
---   return 13
-
-
--- main :: IO ()
--- main = do
---   putStrLn $ "Up and running"
---   ch <- newChan
---   res <- runApp (app :: App (Chan String) Int) ch
---   chres <- readChan ch
---   putStrLn $ show res
---   putStrLn $ "Read from ch: [" ++ chres ++ "]"
---   return ()
+main :: IO ()
+main = do
+  let x = runReader (startSvc (56 :: Int)) ("Wania")
+  putStrLn $ "End: [" ++ show x ++ "]"
