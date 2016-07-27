@@ -34,14 +34,26 @@ instance SockService String where
 
 type MyApp a = forall ss. SockService ss => ss -> Reader String a
 
-startSvc :: MyApp [String]
+
+
+startSvc :: forall ss. SockService ss => ss -> Reader String [String]
 startSvc ss = do
   st <- ask
   return $ ["res", st, ssRead ss]
 
 
+startApp :: [String]
+startApp = runReader (startSvc (56 :: Int)) ("State")
+
+startTest :: [String]
+startTest = runReader (startSvc "Test") ("State")
 
 main :: IO ()
 main = do
-  let x = runReader (startSvc (56 :: Int)) ("Wania")
-  putStrLn $ "End: [" ++ show x ++ "]"
+  putStrLn $ "App:  [" ++ show startApp ++ "]"
+  putStrLn $ "Test: [" ++ show startTest ++ "]"
+
+
+-- Rank2Type
+foo :: (forall a. (a -> a)) -> (Bool, Char)
+foo f = (f True, f 'a')
