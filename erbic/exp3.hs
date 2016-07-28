@@ -4,6 +4,9 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GADTs #-}
+
 
 
 import Prelude hiding (log)
@@ -57,3 +60,11 @@ main = do
 -- Rank2Type
 foo :: (forall a. (a -> a)) -> (Bool, Char)
 foo f = (f True, f 'a')
+
+data T = forall a. MkT a
+
+data T' = forall a. Show a => MkT' a
+
+data MyMaybe where
+  MyJust :: a -> MyMaybe
+  MyNothing :: MyMaybe
