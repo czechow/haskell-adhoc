@@ -15,9 +15,10 @@ import Erbic.In.ConsoleService.ConsoleMsgService
 
 main :: IO ()
 main = do
-  putStrLn "Up and running"
+  putStrLn "Main thread started"
   ch <- newBoundedChan 128 :: IO (BoundedChan String)
-  ssd <- SMS.newSS "X" 12 ch :: IO (SMS.SSData Socket)
+  ssd <- SMS.newSS "X" 12 ch
+         :: IO (SMS.SSInitData Socket (BoundedChan String))
   bracket (tfork $ logger ch) (stopLogger ch) $ \_ ->
     bracket (SMS.startSS ssd) (\ssd' -> SMS.stopSS 0 ssd') $ \_ ->
     bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(cstid, mv) ->
@@ -42,13 +43,9 @@ stopConsoleMsgService (tid, mv) = do
 -- make sure we spit out all the messages
 stopLogger :: BoundedChan String -> ThreadInfo -> IO ()
 stopLogger ch ti = do
-  putStrLn $ "Stopping logger thread " ++ (show $ fst ti)
   stopThread 0 ti
-  putStrLn $ "Logger thread stopped"
-  putStrLn $ "Flushing logger queue"
   msgs <- rdChan
   mapM_ (\m -> putStrLn $ "[LOG flush]: " ++ m) msgs
-  putStrLn "Logger queue flushed"
   where
     rdChan :: IO [String]
     rdChan = do
