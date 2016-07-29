@@ -1,0 +1,14 @@
+TODO
+  Program to the interfaces:
+  Channel should be parametrised
+
+  - Refactor SockMsgService2 typeclass to have fewer methods
+
+  Show me your monads...
+  - Convert code to reader monad to see if it makes sense
+    - Try interaction with state???
+      -> no, multithreading (locking) gets difficult,
+         unless we only read values? =>
+  - Abstract on channel operations (aka logger interface)
+    -> should this be yet another app state (reader) instance?
+       - I don't think so => they do not compose easily
