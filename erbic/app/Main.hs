@@ -21,8 +21,11 @@ main = do
   ch <- newBoundedChan 128
   ssd <- SMS.makeSSInitData "X" 12 ch
          :: IO (SMS.SSInitData Socket (BoundedChan String))
+  -- ssd <- SMS.makeSSInitData "X" 12 (SMS.IgnoringLogger ())
+  --        :: IO (SMS.SSInitData Socket SMS.IgnoringLogger)
+
   bracket (tfork $ logger ch) (stopLogger ch) $ \_ ->
-    bracket (SMS.startSS ssd) (\ssd' -> SMS.stopSS 0 ssd') $ \_ ->
+    bracket (SMS.startSS ssd) (\ssd' -> SMS.stopSS ssd' 0) $ \_ ->
     bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(_, mv) ->
     do
       putStrLn "Enter <quit> to stop"
@@ -43,10 +46,10 @@ stopConsoleMsgService (tid, mv) = do
   putStrLn $ "Console service stopped " ++ show tid
 
 
--- make sure we spit out all the messages
 stopLogger :: BoundedChan String -> ThreadInfo -> IO ()
 stopLogger ch ti = do
   stopThread 0 ti
+  -- Make sure we spit out all the messages
   msgs <- rdChan
   mapM_ (\m -> putStrLn $ "[LOG flush]: " ++ m) msgs
   where

@@ -22,7 +22,6 @@ library
                      , Erbic.IO.Fork
                      , Erbic.In.SockService.Sock
                      , Erbic.In.SockService.SockMsg
-                     , Erbic.In.SockService.SockMsgService
                      , Erbic.In.SockService.SockMsgService2
                      , Erbic.In.ConsoleService.ConsoleMsgService
                      , To

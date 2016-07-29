@@ -8,7 +8,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE DuplicateRecordFields #-}
 
 
 
@@ -73,19 +72,9 @@ data MyMaybe where
   MyNothing :: MyMaybe
 -}
 
-data FR = FR { a' :: Int, c' :: [Int] }
-        deriving Show
-
-data SR = SR { a :: Int, b :: String, c :: [Int] }
-        deriving Show
-
-fr :: FR
-fr = FR 1 [1..3]
-
 main :: IO ()
 main = do
-  let x = f fr
-  putStrLn $ "OK: " ++ show x
-  where
-    f (FR { .. }) = SR { a = a', c = c', b = "ss", .. }
-    --f = let { a = 997 } in SR {..}
+  putStrLn "Ok"
+
+allPlus2 :: [Int] -> [Int]
+allPlus2 xs = xs >>= \x -> return (x + 2)

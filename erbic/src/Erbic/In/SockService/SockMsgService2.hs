@@ -29,11 +29,12 @@ data SSInitData s l = SSInitData { name :: String, logger :: l }
 data SSData s l = SSData { name :: String
                          , sock :: s
                          , logger :: l
-                         , svcData :: (ThreadId, MVar ())
-                         , connData :: IORef (M.Map ThreadId (MVar ())) }
+                         , svcData :: ThreadInfo
+                         , connData :: IORef ThreadPoolInfo }
 
 
 type ErrMsg = String
+type Timeout = Int
 
 data ReadRes = RRData String
              | RRClosed
@@ -47,43 +48,54 @@ class Logger l where
 instance Logger (BoundedChan String) where
   lWrite ch msg = writeChan ch msg
 
+newtype IgnoringLogger = IgnoringLogger ()
+
+instance Logger IgnoringLogger where
+  lWrite _ _ = return ()
+
 
 makeSSInitData :: HostName -> Int -> l -> IO (SSInitData s l)
 makeSSInitData _ _ l = return $ SSInitData "SockSrvName" l
 
 
-class (Show s, Logger l) => Service s l where
-  ssOpen :: l -> IO s
-  ssClose :: s -> l -> IO ()
-  ssAccept :: s -> l -> IO (s, String)
-  ssRead :: s -> Int -> l -> IO ReadRes
+class SockService s where
+  ssOpen :: IO s
+  ssClose :: s -> IO ()
+  ssAccept :: s -> IO (s, String)
+  ssRead :: s -> Int -> IO ReadRes
 
+
+-- FIXME: do we need this to be a typeclass???
+-- perhaps two functions would do?
+class (SockService s, Show s, Logger l) => Service s l where
   startSS :: SSInitData s l -> IO (SSData s l)
   startSS (SSInitData { .. }) = do
+    lWrite logger $ "Starting service " ++ name
     iorConnData <- newIORef M.empty
-    bracketOnError (ssOpen logger :: IO s)
-                   (flip ssClose logger) $ \s ->
+    bracketOnError (ssOpen :: IO s) (ssClose) $ \s -> do
+      lWrite logger $ "Opened socket " ++ show s
       bracketOnError (tfork $ acceptLoop s iorConnData logger)
-                     (stopThread 0) $
-                     \(tid, mv) -> return $ SSData { sock = s
-                                                   , svcData = (tid, mv)
-                                                   , connData = iorConnData
-                                                   , .. }
+                     (stopThread 0) $ \(tid, mv) ->
+                     (do lWrite logger $ "Service " ++ name ++ " started"
+                         return $ SSData { sock = s
+                                         , svcData = (tid, mv)
+                                         , connData = iorConnData
+                                         , .. })
 
-  stopSS :: Int -> SSData s l -> IO ()
-  stopSS t (SSData { .. }) =
-    mask_ $ do let (tid, mv) = svcData
-               lWrite logger $
+  stopSS :: SSData s l -> Timeout -> IO ()
+  stopSS (SSData { .. }) t =
+    mask_ $ do lWrite logger $
                       "Stopping service " ++ name
-               stopThread t (tid, mv)
+               stopThread t svcData
                lWrite logger $
-                      "Accept thread " ++ show tid ++ " stopped"
+                      "Accept thread " ++ show (fst svcData) ++ " stopped"
                tidsMvsMap <- readIORef connData
                lWrite logger $
                       "Stopping connections: " ++ (show $ M.keys tidsMvsMap)
                stopThreadPool t connData
                lWrite logger $ "All connections stopped"
-               ssClose sock logger
+               ssClose sock
+               lWrite logger $ "Closed socket " ++ show sock
                lWrite logger $ "Service " ++ name ++ " stopped"
 
 
@@ -95,7 +107,7 @@ class (Show s, Logger l) => Service s l where
 
 acceptLoop :: Service ss l => ss -> IORef ThreadPoolInfo -> l -> IO ()
 acceptLoop s mvTids l = do
-  bracketOnError (ssAccept s l) (flip ssClose l . fst) $
+  bracketOnError (ssAccept s) (ssClose . fst) $
      \(s', sa') -> mask_ $ do _ <- tpfork (serveConnection s' sa' l) mvTids
                               return ()
   acceptLoop s mvTids l
@@ -108,7 +120,7 @@ serveConnection s sa l = do
                          " on " ++ show s ++
                          " served in " ++ show tid
               doMsgReception s l)
-          (do ssClose s l
+          (do ssClose s
               tid <- myThreadId
               lWrite l $ "Closed connection on " ++ show s ++
                          " in " ++ show tid)
@@ -119,7 +131,7 @@ doMsgReception s l =
   orchRec $ mkScanData "" PPIn
   where
     orchRec sd' = do
-      str <- ssRead s 16 l
+      str <- ssRead s 16
       case str of
         RRData data' -> do let (msgs, sd'') = runScan (filter nonCRLF data') sd'
                            lWrite l $ "Read: [" ++ intercalate "|" msgs ++ "]"
@@ -133,25 +145,26 @@ doMsgReception s l =
 --                                Instances
 -------------------------------------------------------------------------------
 
-instance Logger l => Service Socket l where
-  ssOpen l =
+instance SockService Socket where
+  ssOpen =
       bracketOnError
         (socket AF_INET Stream defaultProtocol)
-        (\s -> ssClose s l)
+        (\s -> ssClose s)
         (\s -> do
             setSocketOption s ReuseAddr 1
             hostAddr <- inet_addr "127.0.0.1"
-            lWrite l  $ "Socket " ++ show s ++ " opened"
             bind s (SockAddrInet 2222 hostAddr)
             listen s 5
             return s)
-  ssClose s l = do close s
-                   lWrite l $ "Socket closed " ++ show s
-  ssAccept s _ = do (s', sa') <- accept s
-                    return (s', show sa')
-  ssRead s len _ = (RRData <$> recv s len) `catch` handler
+  ssClose s = close s
+  ssAccept s = do (s', sa') <- accept s
+                  return (s', show sa')
+  ssRead s len = (RRData <$> recv s len) `catch` handler
     where
       handler :: IOException -> IO ReadRes
       handler e = case ioe_type e of
         EOF -> return RRClosed
         _ -> return $ RRError (fromInteger . toInteger <$> ioe_errno e) $ show e
+
+
+instance (SockService Socket, Logger l) => Service Socket l
