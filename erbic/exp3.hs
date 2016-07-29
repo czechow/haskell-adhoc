@@ -6,6 +6,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 
 
@@ -15,16 +18,16 @@ import Prelude hiding (log)
 -- import Control.Exception
 -- import Network.Socket
 -- import Data.Map.Strict as M
-import Control.Exception
-import Control.Monad
-import Control.Monad.Reader
-import Control.Monad.Identity
-import Control.Concurrent.Chan
-import qualified Data.Text.IO as TIO
-import System.IO
+-- import Control.Exception
+-- import Control.Monad
+-- import Control.Monad.Reader
+-- import Control.Monad.Identity
+-- import Control.Concurrent.Chan
+-- import qualified Data.Text.IO as TIO
+-- import System.IO
 
 
-
+{-
 class SockService ss where
   ssRead :: ss -> String
 
@@ -68,3 +71,21 @@ data T' = forall a. Show a => MkT' a
 data MyMaybe where
   MyJust :: a -> MyMaybe
   MyNothing :: MyMaybe
+-}
+
+data FR = FR { a' :: Int, c' :: [Int] }
+        deriving Show
+
+data SR = SR { a :: Int, b :: String, c :: [Int] }
+        deriving Show
+
+fr :: FR
+fr = FR 1 [1..3]
+
+main :: IO ()
+main = do
+  let x = f fr
+  putStrLn $ "OK: " ++ show x
+  where
+    f (FR { .. }) = SR { a = a', c = c', b = "ss", .. }
+    --f = let { a = 997 } in SR {..}
