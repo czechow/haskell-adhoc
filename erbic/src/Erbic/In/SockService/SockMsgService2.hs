@@ -4,6 +4,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module Erbic.In.SockService.SockMsgService2 where
 
@@ -22,7 +24,7 @@ import Erbic.Data.Msg.ScanMsg
 
 
 
-data SSInitData s l = SSInitData String l
+data SSInitData s l = SSInitData { name :: String, logger :: l }
 
 data SSData s l = SSData { name :: String
                          , sock :: s
@@ -51,39 +53,38 @@ class (Show s, Logger l) => Service s l where
   ssAccept :: s -> l -> IO (s, String)
   ssRead :: s -> Int -> l -> IO ReadRes
 
+  -- this is probably redundant...
   newSS :: HostName -> Int -> l -> IO (SSInitData s l)
   newSS _ _ l = return $ SSInitData "SockSrvName" l
 
 
   startSS :: SSInitData s l -> IO (SSData s l)
-  startSS (SSInitData nme l) = do
+  startSS (SSInitData { .. }) = do
     iorConnData <- newIORef M.empty
-    bracketOnError (ssOpen l :: IO s)
-                   (flip ssClose l) $ \s ->
-      bracketOnError (tfork $ acceptLoop s iorConnData l)
+    bracketOnError (ssOpen logger :: IO s)
+                   (flip ssClose logger) $ \s ->
+      bracketOnError (tfork $ acceptLoop s iorConnData logger)
                      (stopThread 0) $
-                     \(tid, mv) -> return $ SSData { name = nme
-                                                   , sock = s
-                                                   , logger = l
+                     \(tid, mv) -> return $ SSData { sock = s
                                                    , svcData = (tid, mv)
                                                    , connData = iorConnData
-                                                   }
+                                                   , .. }
 
   stopSS :: Int -> SSData s l -> IO ()
-  stopSS t ssd =
-    mask_ $ do let (tid, mv) = svcData ssd
-               lWrite (logger ssd) $
-                      "Stopping service " ++ name ssd
+  stopSS t (SSData { .. }) =
+    mask_ $ do let (tid, mv) = svcData
+               lWrite logger $
+                      "Stopping service " ++ name
                stopThread t (tid, mv)
-               lWrite (logger ssd) $
+               lWrite logger $
                       "Accept thread " ++ show tid ++ " stopped"
-               tidsMvsMap <- readIORef $ connData ssd
-               lWrite (logger ssd) $
-                      "Now stopping connections: " ++ (show $ M.keys tidsMvsMap)
-               stopThreadPool t $ connData ssd
-               lWrite (logger ssd) $ "All connections stopped"
-               ssClose (sock ssd) (logger ssd)
-               lWrite (logger ssd) $ "Service " ++ name ssd ++ " stopped"
+               tidsMvsMap <- readIORef connData
+               lWrite logger $
+                      "Stopping connections: " ++ (show $ M.keys tidsMvsMap)
+               stopThreadPool t connData
+               lWrite logger $ "All connections stopped"
+               ssClose sock logger
+               lWrite logger $ "Service " ++ name ++ " stopped"
 
 
   isSSRunning :: SSData s l -> IO Bool
@@ -132,7 +133,7 @@ doMsgReception s l =
 --                                Instances
 -------------------------------------------------------------------------------
 
-instance Service Socket (BoundedChan String) where
+instance Logger l => Service Socket l where
   ssOpen l =
       bracketOnError
         (socket AF_INET Stream defaultProtocol)
@@ -148,7 +149,6 @@ instance Service Socket (BoundedChan String) where
                    lWrite l $ "Socket closed " ++ show s
   ssAccept s _ = do (s', sa') <- accept s
                     return (s', show sa')
-
   ssRead s len _ = (RRData <$> recv s len) `catch` handler
     where
       handler :: IOException -> IO ReadRes
