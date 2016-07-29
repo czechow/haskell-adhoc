@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Main where
 
 
@@ -16,16 +18,15 @@ import Erbic.In.ConsoleService.ConsoleMsgService
 main :: IO ()
 main = do
   putStrLn "Main thread started"
-  ch <- newBoundedChan 128 :: IO (BoundedChan String)
-  ssd <- SMS.newSS "X" 12 ch
+  ch <- newBoundedChan 128
+  ssd <- SMS.makeSSInitData "X" 12 ch
          :: IO (SMS.SSInitData Socket (BoundedChan String))
   bracket (tfork $ logger ch) (stopLogger ch) $ \_ ->
     bracket (SMS.startSS ssd) (\ssd' -> SMS.stopSS 0 ssd') $ \_ ->
-    bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(cstid, mv) ->
+    bracket (runConsoleMsgService ch) (stopConsoleMsgService) $ \(_, mv) ->
     do
       putStrLn "Enter <quit> to stop"
       _ <- readMVar mv
-      putStrLn $ "Console thread stopped " ++ show cstid
       return ()
   putStrLn $ "Main thread stopped"
 
@@ -39,6 +40,8 @@ stopConsoleMsgService (tid, mv) = do
   putStrLn $ "Stopping console service " ++ show tid
   killThread tid
   readMVar mv
+  putStrLn $ "Console service stopped " ++ show tid
+
 
 -- make sure we spit out all the messages
 stopLogger :: BoundedChan String -> ThreadInfo -> IO ()
@@ -47,9 +50,5 @@ stopLogger ch ti = do
   msgs <- rdChan
   mapM_ (\m -> putStrLn $ "[LOG flush]: " ++ m) msgs
   where
-    rdChan :: IO [String]
-    rdChan = do
-      mMsg <- tryReadChan ch
-      case mMsg of
-        Just msg -> (msg :) <$> rdChan
-        Nothing -> return []
+    rdChan = tryReadChan ch >>= \case Just msg -> (msg :) <$> rdChan
+                                      Nothing -> return []

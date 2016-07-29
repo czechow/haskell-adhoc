@@ -32,6 +32,7 @@ data SSData s l = SSData { name :: String
                          , svcData :: (ThreadId, MVar ())
                          , connData :: IORef (M.Map ThreadId (MVar ())) }
 
+
 type ErrMsg = String
 
 data ReadRes = RRData String
@@ -47,16 +48,15 @@ instance Logger (BoundedChan String) where
   lWrite ch msg = writeChan ch msg
 
 
+makeSSInitData :: HostName -> Int -> l -> IO (SSInitData s l)
+makeSSInitData _ _ l = return $ SSInitData "SockSrvName" l
+
+
 class (Show s, Logger l) => Service s l where
   ssOpen :: l -> IO s
   ssClose :: s -> l -> IO ()
   ssAccept :: s -> l -> IO (s, String)
   ssRead :: s -> Int -> l -> IO ReadRes
-
-  -- this is probably redundant...
-  newSS :: HostName -> Int -> l -> IO (SSInitData s l)
-  newSS _ _ l = return $ SSInitData "SockSrvName" l
-
 
   startSS :: SSInitData s l -> IO (SSData s l)
   startSS (SSInitData { .. }) = do
@@ -88,9 +88,9 @@ class (Show s, Logger l) => Service s l where
 
 
   isSSRunning :: SSData s l -> IO Bool
-  isSSRunning ssd =
-    tryReadMVar (snd $ svcData ssd) >>= \case Just _ -> return False
-                                              Nothing -> return True
+  isSSRunning (SSData { .. }) =
+    tryReadMVar (snd svcData) >>= \case Just _ -> return False
+                                        Nothing -> return True
 
 
 acceptLoop :: Service ss l => ss -> IORef ThreadPoolInfo -> l -> IO ()
