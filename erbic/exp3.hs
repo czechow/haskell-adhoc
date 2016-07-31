@@ -19,62 +19,58 @@ import Prelude hiding (log)
 -- import Data.Map.Strict as M
 -- import Control.Exception
 -- import Control.Monad
--- import Control.Monad.Reader
+import Control.Monad.Reader
 -- import Control.Monad.Identity
 -- import Control.Concurrent.Chan
 -- import qualified Data.Text.IO as TIO
 -- import System.IO
+import Data.IORef
+
+data SSData = SSData { iorName :: IORef String }
 
 
-{-
-class SockService ss where
-  ssRead :: ss -> String
-
-instance SockService Int where
-  ssRead x = "Text from sock service " ++ show x
-
-instance SockService String where
-  ssRead x = "Text here: " ++ x
+mkSSData :: IO SSData
+mkSSData = do
+  ior <- newIORef "Initialized"
+  return $ SSData { iorName = ior }
 
 
-type MyApp a = forall ss. SockService ss => ss -> Reader String a
+startAction :: ReaderT SSData IO SSData
+startAction = do
+  ssd@(SSData { .. }) <- ask
+  name <- liftIO $ readIORef iorName
+  liftIO $ putStrLn $ "startAction called with state [" ++ name ++ "]"
+  liftIO $ modifyIORef iorName $ \_ -> "Started"
+  return ssd
+
+stopAction :: ReaderT SSData IO SSData
+stopAction = do
+  ssd@(SSData { .. }) <- ask
+  name <- liftIO $ readIORef iorName
+  liftIO $ putStrLn $ "stopAction called with state [" ++ name ++ "]"
+  liftIO $ modifyIORef iorName $ \_ -> "Stopped"
+  return ssd
 
 
-
-startSvc :: forall ss. SockService ss => ss -> Reader String [String]
-startSvc ss = do
-  st <- ask
-  return $ ["res", st, ssRead ss]
-
-
-startApp :: [String]
-startApp = runReader (startSvc (56 :: Int)) ("State")
-
-startTest :: [String]
-startTest = runReader (startSvc "Test") ("State")
-
-main :: IO ()
-main = do
-  putStrLn $ "App:  [" ++ show startApp ++ "]"
-  putStrLn $ "Test: [" ++ show startTest ++ "]"
+startSS :: IO SSData
+startSS = do
+  ssd <- mkSSData
+  ssd' <- runReaderT startAction ssd
+  name' <- readIORef (iorName ssd')
+  putStrLn $ "startAction changed state to [" ++ name' ++ "]"
+  return ssd'
 
 
--- Rank2Type
-foo :: (forall a. (a -> a)) -> (Bool, Char)
-foo f = (f True, f 'a')
-
-data T = forall a. MkT a
-
-data T' = forall a. Show a => MkT' a
-
-data MyMaybe where
-  MyJust :: a -> MyMaybe
-  MyNothing :: MyMaybe
--}
+stopSS :: SSData -> IO SSData
+stopSS ssd = do
+  ssd' <- runReaderT stopAction ssd
+  name' <- readIORef (iorName ssd')
+  putStrLn $ "stopAction changed state to [" ++ name' ++ "]"
+  return ssd'
 
 main :: IO ()
 main = do
   putStrLn "Ok"
-
-allPlus2 :: [Int] -> [Int]
-allPlus2 xs = xs >>= \x -> return (x + 2)
+  ssd <- startSS
+  _ <- stopSS ssd
+  return ()
