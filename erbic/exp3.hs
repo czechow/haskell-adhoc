@@ -25,7 +25,7 @@ import Control.Monad.Writer
 -- import Control.Monad.Identity
 import Control.Concurrent.Chan
 -- import qualified Data.Text.IO as TIO
--- import System.IO
+import System.Timeout
 import Data.IORef
 
 
@@ -33,7 +33,6 @@ data SSData l = SSData { iorName :: IORef String, logger :: l }
 
 class Logger l where
   lWrite :: l -> String -> IO ()
-  lIsEmpty :: l -> IO Bool
   lRead :: l -> IO String
 
 
@@ -89,15 +88,14 @@ main = do
   where
     readLog :: Logger l => l -> IO ()
     readLog ch = do
-      isEmpty <- lIsEmpty ch
-      if isEmpty
-        then return ()
-        else do (\x -> putStrLn $ "[LOG]: " ++ x) =<< lRead ch
-                readLog ch
+      mv <- timeout 1000 $ lRead ch
+      case mv of
+        Just x -> do putStrLn $ "[LOG]: " ++ x
+                     readLog ch
+        Nothing -> return ()
 
 instance Logger (Chan String) where
   lWrite ch msg = writeChan ch msg
-  lIsEmpty ch = isEmptyChan ch
   lRead ch = readChan ch
 
 data ThrottlingLogger = TL { iorCnt :: IORef Int, logger' :: Chan String }
@@ -116,5 +114,4 @@ instance Logger ThrottlingLogger where
       then putStrLn "Message limit exceeded"
       else do modifyIORef' iorCnt (+1)
               writeChan logger' msg
-  lIsEmpty TL {..} = isEmptyChan logger'
   lRead TL {..} = readChan logger'
