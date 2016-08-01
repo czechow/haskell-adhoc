@@ -20,57 +20,101 @@ import Prelude hiding (log)
 -- import Control.Exception
 -- import Control.Monad
 import Control.Monad.Reader
+import Control.Monad.Identity
+import Control.Monad.Writer
 -- import Control.Monad.Identity
--- import Control.Concurrent.Chan
+import Control.Concurrent.Chan
 -- import qualified Data.Text.IO as TIO
 -- import System.IO
 import Data.IORef
 
-data SSData = SSData { iorName :: IORef String }
+
+data SSData l = SSData { iorName :: IORef String, logger :: l }
+
+class Logger l where
+  lWrite :: l -> String -> IO ()
+  lIsEmpty :: l -> IO Bool
+  lRead :: l -> IO String
 
 
-mkSSData :: IO SSData
-mkSSData = do
+mkSSData :: Logger l => l -> IO (SSData l)
+mkSSData l = do
   ior <- newIORef "Initialized"
-  return $ SSData { iorName = ior }
+  return $ SSData { iorName = ior, logger = l }
 
 
-startAction :: ReaderT SSData IO SSData
+startAction :: Logger l => ReaderT (SSData l) IO (SSData l)
 startAction = do
   ssd@(SSData { .. }) <- ask
   name <- liftIO $ readIORef iorName
-  liftIO $ putStrLn $ "startAction called with state [" ++ name ++ "]"
-  liftIO $ modifyIORef iorName $ \_ -> "Started"
+  liftIO $ do lWrite logger $ "startAction called with state [" ++ name ++ "]"
+              modifyIORef iorName $ \_ -> "Started"
   return ssd
 
-stopAction :: ReaderT SSData IO SSData
+stopAction :: Logger l => ReaderT (SSData l) IO (SSData l)
 stopAction = do
   ssd@(SSData { .. }) <- ask
   name <- liftIO $ readIORef iorName
-  liftIO $ putStrLn $ "stopAction called with state [" ++ name ++ "]"
-  liftIO $ modifyIORef iorName $ \_ -> "Stopped"
+  liftIO $ do lWrite logger $ "stopAction called with state [" ++ name ++ "]"
+              modifyIORef iorName $ \_ -> "Stopped"
   return ssd
 
 
-startSS :: IO SSData
-startSS = do
-  ssd <- mkSSData
+startSS :: Logger l => l -> IO (SSData l)
+startSS l = do
+  ssd <- mkSSData l
   ssd' <- runReaderT startAction ssd
   name' <- readIORef (iorName ssd')
-  putStrLn $ "startAction changed state to [" ++ name' ++ "]"
+  lWrite l $ "startAction changed state to [" ++ name' ++ "]"
   return ssd'
 
 
-stopSS :: SSData -> IO SSData
+stopSS :: Logger l => SSData l -> IO (SSData l)
 stopSS ssd = do
   ssd' <- runReaderT stopAction ssd
   name' <- readIORef (iorName ssd')
-  putStrLn $ "stopAction changed state to [" ++ name' ++ "]"
+  lWrite (logger ssd) $ "stopAction changed state to [" ++ name' ++ "]"
   return ssd'
 
 main :: IO ()
 main = do
   putStrLn "Ok"
-  ssd <- startSS
+  --ch <- newChan :: IO (Chan String)
+  l <- mkTL
+  ssd <- startSS l
   _ <- stopSS ssd
+
+  readLog l
   return ()
+  where
+    readLog :: Logger l => l -> IO ()
+    readLog ch = do
+      isEmpty <- lIsEmpty ch
+      if isEmpty
+        then return ()
+        else do (\x -> putStrLn $ "[LOG]: " ++ x) =<< lRead ch
+                readLog ch
+
+instance Logger (Chan String) where
+  lWrite ch msg = writeChan ch msg
+  lIsEmpty ch = isEmptyChan ch
+  lRead ch = readChan ch
+
+data ThrottlingLogger = TL { iorCnt :: IORef Int, logger' :: Chan String }
+
+mkTL :: IO ThrottlingLogger
+mkTL = do
+  ic <- newIORef 0
+  l <- newChan
+  return $ TL ic l
+
+
+instance Logger ThrottlingLogger where
+  lWrite TL {..} msg = do
+    cnt <- readIORef iorCnt
+    if cnt >= 2
+      then putStrLn "Message limit exceeded"
+      else do modifyIORef' iorCnt (+1)
+              writeChan logger' msg
+  lIsEmpty TL {..} = isEmptyChan logger'
+  lRead TL {..} = readChan logger'
