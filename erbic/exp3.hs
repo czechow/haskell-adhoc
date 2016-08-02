@@ -115,3 +115,14 @@ instance Logger ThrottlingLogger where
       else do modifyIORef' iorCnt (+1)
               writeChan logger' msg
   lRead TL {..} = readChan logger'
+
+-------------------------------------------------------------------------------
+-- Foldable experiments
+-------------------------------------------------------------------------------
+data Tree a = Leaf a
+            | Node a (Tree a) (Tree a)
+            deriving Show
+
+instance Functor Tree where
+  fmap h (Leaf x) = Leaf $ h x
+  fmap h (Node x t1 t2) = Node (h x) (fmap h t1) (fmap h t2)
