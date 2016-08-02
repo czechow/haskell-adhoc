@@ -126,3 +126,10 @@ data Tree a = Leaf a
 instance Functor Tree where
   fmap h (Leaf x) = Leaf $ h x
   fmap h (Node x t1 t2) = Node (h x) (fmap h t1) (fmap h t2)
+
+instance Foldable Tree where
+  foldMap h (Leaf x) = h x
+  foldMap h (Node x t1 t2) = h x <> foldMap h t1 <> foldMap h t2
+
+aTree :: Tree Int
+aTree = Node 13 (Leaf 2) (Node 1 (Leaf 3) (Leaf 4))
