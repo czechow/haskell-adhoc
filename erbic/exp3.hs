@@ -128,8 +128,16 @@ instance Functor Tree where
   fmap h (Node x t1 t2) = Node (h x) (fmap h t1) (fmap h t2)
 
 instance Foldable Tree where
+  -- foldMap :: Monoid m => (a -> m) -> t a -> m
   foldMap h (Leaf x) = h x
   foldMap h (Node x t1 t2) = h x <> foldMap h t1 <> foldMap h t2
+
+instance Traversable Tree where
+  --traverse :: Applicative f => (a -> f b) -> t a -> f (t b)
+  traverse ha2fb (Leaf x) = Leaf <$> ha2fb x
+  traverse ha2fb (Node x t1 t2) =
+    pure Node <*> ha2fb x <*> traverse ha2fb t1 <*> traverse ha2fb t2
+
 
 aTree :: Tree Int
 aTree = Node 13 (Leaf 2) (Node 1 (Leaf 3) (Leaf 4))
