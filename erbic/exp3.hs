@@ -141,3 +141,26 @@ instance Traversable Tree where
 
 aTree :: Tree Int
 aTree = Node 13 (Leaf 2) (Node 1 (Leaf 3) (Leaf 4))
+
+
+data Tree' a = Nil
+             | Node' a (Tree' a) (Tree' a)
+             deriving Show
+
+instance Functor Tree' where
+  fmap _ Nil = Nil
+  fmap h (Node' x t1 t2) = Node' (h x) (fmap h t1) (fmap h t2)
+
+instance Foldable Tree' where
+  -- foldMap :: Monoid m => (a -> m) -> t a -> m
+  foldMap _ Nil = mempty
+  foldMap h (Node' x t1 t2) = h x <> foldMap h t1 <> foldMap h t2
+
+instance Traversable Tree' where
+  --traverse :: Applicative f => (a -> f b) -> t a -> f (t b)
+  traverse _ Nil = pure Nil
+  traverse h (Node' x t1 t2) =
+    Node' <$> h x <*> traverse h t1 <*> traverse h t2
+
+aTree' :: Tree' Int
+aTree' = Node' 13 Nil (Node' 1 Nil Nil)
