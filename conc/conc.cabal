@@ -19,6 +19,7 @@ library
                      , TVars
   build-depends:       base >= 4.7 && < 5
                      , stm
+                     , containers
   default-language:    Haskell2010
 
 executable conc
