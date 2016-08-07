@@ -6,6 +6,8 @@ import System.IO.Unsafe
 import Control.Concurrent
 import Control.Monad
 
+import Channel
+
 book :: TVar (Map String String)
 book = unsafePerformIO $ newTVarIO empty
 
@@ -22,7 +24,7 @@ main = do
   tid <- forkIO $ dumpBookLoop
   void getLine
   killThread tid
-
+  void $ newCh
 
 
 dumpBookLoop :: IO ()
