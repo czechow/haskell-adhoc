@@ -8,5 +8,8 @@ tests :: [IO Bool]
 tests = [ScanMsgProp.runTests]
 
 main :: IO ()
-main = all id <$> sequence tests >>= \case True -> exitSuccess
-                                           False -> exitFailure
+main = all id <$> sequence tests >>= exit
+
+exit :: Bool -> IO ()
+exit True = exitSuccess
+exit False = exitFailure
