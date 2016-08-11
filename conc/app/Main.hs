@@ -8,8 +8,10 @@ import qualified Data.Map as M
 
 import Channel
 
+import qualified Thrds
+
 main :: IO ()
-main = main5
+main = Thrds.main
 
 -------------------------------------------------------------jamming----------
 
