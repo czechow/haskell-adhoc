@@ -1,11 +1,12 @@
 {-# LANGUAGE LambdaCase #-}
 
 import qualified Erbic.Data.Msg.ScanMsgProp as ScanMsgProp
+import qualified MonadicProp
 
 import System.Exit
 
 tests :: [IO Bool]
-tests = [ScanMsgProp.runTests]
+tests = [ScanMsgProp.runTests, MonadicProp.runTests]
 
 main :: IO ()
 main = all id <$> sequence tests >>= exit
