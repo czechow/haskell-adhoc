@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 import qualified Erbic.Data.Msg.ScanMsgProp as ScanMsgProp
 import qualified MonadicProp
 

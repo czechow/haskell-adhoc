@@ -10,8 +10,8 @@ import Test.QuickCheck.Monadic
 --                                Properties
 -------------------------------------------------------------------------------
 
---prop_monadic :: Property
-prop_monadic x = monadicIO $ do
+prop_monadic :: Int -> Property
+prop_monadic _ = monadicIO $ do
   assert True
 
 -------------------------------------------------------------------------------
