@@ -1,13 +1,15 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings#-}
 
 module To where
 
 
-import System.Timeout
 import System.IO
 import Control.Concurrent
 import Control.Exception
-import Network.Socket
+import Network.Socket hiding (send, recv)
+import Network.Socket.ByteString (recv)
+import Data.ByteString.Char8 (unpack)
 import Control.Monad
 import GHC.IO.Exception
 import Data.List.Split
@@ -61,7 +63,7 @@ data SockReadRes = SRRData String
 
 
 readSock :: Socket -> IO SockReadRes
-readSock s = readWith (recv s 8)
+readSock s = readWith $ unpack <$> (recv s 8)
 
 
 readWith :: IO String -> IO SockReadRes
@@ -337,7 +339,7 @@ doServeConn :: Socket -> IO ()
 doServeConn s = do
   ms <- getMaskingState
   putStrLn $ "doServerConn: Mask state is " ++  show ms
-  recv s 16 >>= putStrLn
+  unpack <$> recv s 16 >>= putStrLn
   doServeConn s
 
 

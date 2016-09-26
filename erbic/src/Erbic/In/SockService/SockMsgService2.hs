@@ -12,7 +12,9 @@ module Erbic.In.SockService.SockMsgService2 where
 
 import Control.Concurrent hiding (writeChan)
 import Control.Exception
-import Network.Socket
+import Network.Socket hiding (recv)
+import Network.Socket.ByteString (recv)
+import Data.ByteString.Char8 (unpack)
 import qualified Data.Map.Strict as M
 import GHC.IO.Exception
 import Erbic.IO.Fork
@@ -159,7 +161,7 @@ instance SockService Socket where
   ssClose s = close s
   ssAccept s = do (s', sa') <- accept s
                   return (s', show sa')
-  ssRead s len = (RRData <$> recv s len) `catch` handler
+  ssRead s len = (RRData . unpack <$> recv s len) `catch` handler
     where
       handler :: IOException -> IO ReadRes
       handler e = case ioe_type e of

@@ -1,12 +1,15 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Httpd where
 
-import Network.Socket
+import Network.Socket hiding (send)
+import Network.Socket.ByteString (send)
 import Control.Concurrent
 import System.IO
 import System.Timeout
 import Control.Monad
 import Control.Exception
 import Data.Char (toUpper)
+import Data.ByteString.Char8 (pack)
 
 msg :: String
 msg = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nPong!\r\n"
@@ -132,7 +135,7 @@ serveConn s (SI mvStopReq mvFinished) = do
       process (Right Nothing) = return ConnLoop
 
       loopOrStop (ConnMsg (code, msg')) =
-        try' (send s (show code ++ ": " ++ msg' ++ "\r\n")) >>
+        try' (send s (pack (show code ++ ": " ++ msg' ++ "\r\n"))) >>
         loop
       loopOrStop ConnLoop = loop
       loopOrStop (ConnClose errMsg) = putStrLn errMsg >>
