@@ -1,15 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Httpd where
 
-import Network.Socket hiding (send)
-import Network.Socket.ByteString (send)
+import Network.Socket hiding (send, recv)
+import Network.Socket.ByteString (send, recv)
 import Control.Concurrent
 import System.IO
 import System.Timeout
 import Control.Monad
 import Control.Exception
 import Data.Char (toUpper)
-import Data.ByteString.Char8 (pack)
+import Data.ByteString.Char8 (pack, unpack)
 
 msg :: String
 msg = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nPong!\r\n"
@@ -113,6 +113,8 @@ data ConnState = ConnClose String
                | ConnMsg (Code, String)
                deriving Show
 
+
+
 -- FIXME: reading until newline?
 serveConn :: Socket -> StopInfo -> IO ()
 serveConn s (SI mvStopReq mvFinished) = do
@@ -121,7 +123,7 @@ serveConn s (SI mvStopReq mvFinished) = do
     where
       loop = read' >>= shouldTerminate >>= process >>= loopOrStop
 
-      read' =  try' (timeout 1000000 $ recvLen s 1024)
+      read' = try' (timeout 1000000 $ fmap unpack $ recv s 1024)
 
       shouldTerminate (Left _) = return $ Left "Other party closed connection"
       shouldTerminate (Right x) = do
@@ -131,7 +133,7 @@ serveConn s (SI mvStopReq mvFinished) = do
          Nothing -> return $ Right x
 
       process (Left x) = return $ ConnClose x
-      process (Right (Just (msg', _))) = return $ processMsg $ map toUpper msg'
+      process (Right (Just msg')) = return $ processMsg $ map toUpper msg'
       process (Right Nothing) = return ConnLoop
 
       loopOrStop (ConnMsg (code, msg')) =
