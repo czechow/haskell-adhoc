@@ -15,9 +15,8 @@ type TimeoutMs = Int
 tfork :: IO () -> IO ThreadInfo
 tfork action = do
   mv <- newEmptyMVar :: IO (MVar ())
-  tid <- forkIOWithUnmask $
-         \unmask -> finally (unmask action)
-                            (putMVar mv ())
+  tid <- mask_ $ forkIOWithUnmask $ \unmask -> finally (unmask action)
+                                                       (putMVar mv ())
   return (tid, mv)
 
 
