@@ -2,7 +2,6 @@
 
 module MonadicProp where
 
-import Control.Monad
 import Test.QuickCheck
 import Test.QuickCheck.Monadic
 import Erbic.IO.Fork
@@ -12,35 +11,53 @@ import GHC.Conc
 --                                Properties
 -------------------------------------------------------------------------------
 
-prop_myfork :: Property
-prop_myfork = forAll genInput $ \(tc, bs) ->  monadicIO $ do
-  (tids, mvars) <- run $ unzip <$> (replicateM tc $ tfork $ do
-                                       return ())
-  let (ktids, _) = unzip $ filter (snd) $ zip tids bs
+prop_tfork_ok :: Property
+prop_tfork_ok = forAll gen_tfork $ \kts ->  monadicIO $ do
+  (tids, mvars) <- run $ unzip <$> mapM (\_ -> tfork $ do return ()) kts
 
-  run $ mapM_ killThread ktids
+  run $ mapM_ killThread $ fst . unzip $ filter (snd) $ zip tids kts
 
   _ <- run $ mapM readMVar mvars
-  res <- run $ allFinished tc tids
-  assert res
-  where
-    allFinished :: Int -> [ThreadId] -> IO Bool
-    allFinished tc' tids = do
-      ss <- mapM threadStatus tids
-      if all (== ThreadFinished) ss
-        then return True
-        else allFinished tc' tids
+  af <- run $ allFinished tids
+  assert af
+
+prop_stopThread_ok :: Property
+prop_stopThread_ok = forAll gen_stopThread $ \args -> monadicIO $ do
+  let (sts, kts) = unzip args
+  (tids, mvars) <- run $ unzip <$> mapM (\st -> tfork $ do threadDelay st
+                                                           return()) sts
+
+  run $ mapM_ killThread $ fst . unzip $ filter (snd) $ zip tids kts
+
+  _ <- run $ mapM readMVar mvars
+  af <- run $ allFinished tids
+  assert af
+  assert True
 
 -------------------------------------------------------------------------------
 --                               Generators
 -------------------------------------------------------------------------------
 
-genInput :: Gen (Int, [Bool])
-genInput = do
+gen_tfork :: Gen [Bool]
+gen_tfork = do
   n <- choose(1, 64)
   bs <- vectorOf n $ elements [False, True]
-  return (n, bs)
+  return bs
 
+gen_stopThread :: Gen [(Int, Bool)]
+gen_stopThread = do
+  bs <- gen_tfork
+  sts <- vectorOf (length bs) $ elements $ map (10^) [0 :: Int .. 3]
+  return $ zip sts bs
+-------------------------------------------------------------------------------
+--                                Helpers
+-------------------------------------------------------------------------------
+allFinished :: [ThreadId] -> IO Bool
+allFinished tids = do
+  ss <- mapM threadStatus tids
+  if all (== ThreadFinished) ss
+    then return True
+    else allFinished tids
 
 -------------------------------------------------------------------------------
 --                                 Runner
