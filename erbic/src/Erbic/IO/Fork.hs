@@ -20,11 +20,11 @@ tfork action = do
   return (tid, mv)
 
 
-tpfork :: IO () -> IORef ThreadPoolInfo -> IO (ThreadId)
+tpfork :: IO () -> IORef ThreadPoolInfo -> IO ThreadId
 tpfork action mvTids =
   forkIOWithUnmask $ \unmask -> do bracket_ startup
-                                            finish $
-                                            unmask action
+                                            finish
+                                            (unmask action)
   where
     startup = do
       mv <- newEmptyMVar :: IO (MVar ())

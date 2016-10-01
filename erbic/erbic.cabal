@@ -59,6 +59,7 @@ test-suite test
   build-depends:       base
                      , erbic
                      , split
+                     , containers
                      , QuickCheck
   other-modules:       Erbic.Data.Msg.ScanMsgProp
                      , Dummy
