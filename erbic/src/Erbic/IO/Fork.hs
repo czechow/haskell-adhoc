@@ -21,20 +21,20 @@ tfork action = do
 
 
 tpfork :: IO () -> IORef ThreadPoolInfo -> IO ThreadId
-tpfork action mvTids =
-  forkIOWithUnmask $ \unmask -> do bracket_ startup
-                                            finish
-                                            (unmask action)
+tpfork action iorTpi =
+  mask_ $ forkIOWithUnmask $ \unmask -> do bracket_ startup
+                                                    finish
+                                                    (unmask action)
   where
     startup = do
       mv <- newEmptyMVar :: IO (MVar ())
       tid <- myThreadId
-      uninterruptibleMask_ $
-        modifyIORef' mvTids $ \tis -> M.insert tid mv tis
+      atomicModifyIORef' iorTpi $ \tis -> (M.insert tid mv tis, ())
+
 
     finish = do
       tid <- myThreadId
-      mmv <- atomicModifyIORef' mvTids $ \tis -> let ret = M.lookup tid tis
+      mmv <- atomicModifyIORef' iorTpi $ \tis -> let ret = M.lookup tid tis
                                                  in (M.delete tid tis, ret)
       case mmv of
         Just mv -> putMVar mv ()
@@ -42,8 +42,8 @@ tpfork action mvTids =
 
 
 stopThreadPool :: TimeoutMs -> IORef ThreadPoolInfo -> IO ()
-stopThreadPool _ mvThrInfos = do
-  tidsMvsMap <- readIORef mvThrInfos
+stopThreadPool _ iorTpi = do
+  tidsMvsMap <- readIORef iorTpi
   mapM_ killThread $ M.keys tidsMvsMap
   mapM_ readMVar $ M.elems tidsMvsMap
 
