@@ -161,7 +161,12 @@ instance SockService Socket where
   ssClose s = close s
   ssAccept s = do (s', sa') <- accept s
                   return (s', show sa')
-  ssRead s len = (RRData . unpack <$> recv s len) `catch` handler
+
+  -- FIXME: Semantics changed from
+  -- with moving from import Network.Socket.recv
+  -- to Network.Socket.ByteString.recv
+  --ssRead s len = (RRData . unpack <$> recv s len) `catch` handler
+  ssRead s len = (RRData . fst <$> Network.Socket.recvLen s len) `catch` handler
     where
       handler :: IOException -> IO ReadRes
       handler e = case ioe_type e of

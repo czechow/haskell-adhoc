@@ -1,5 +1,6 @@
 module Erbic.In.SockService.Sock where
 
+-- FIXME: this is probably obsolete... (?)
 
 import Control.Exception
 import Network.Socket hiding (recv)
@@ -39,7 +40,8 @@ instance SockService Socket where
   ssClose s = do close s
                  putStrLn $ "Socket closed: " ++ show s -- debug
 
-  ssRead s len = (RRData . unpack <$> recv s len) `catch` handler
+  ssRead s len = do putStrLn "HERE"
+                    (RRData . unpack <$> recv s len) `catch` handler
     where
       handler :: IOException -> IO ReadRes
       handler e = case ioe_type e of
