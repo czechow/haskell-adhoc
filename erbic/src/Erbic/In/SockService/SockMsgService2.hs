@@ -14,7 +14,7 @@ import Control.Concurrent hiding (writeChan)
 import Control.Exception
 import Network.Socket hiding (recv)
 import Network.Socket.ByteString (recv)
-import Data.ByteString.Char8 (unpack)
+import qualified Data.ByteString.Char8 as B (unpack, null)
 import qualified Data.Map.Strict as M
 import GHC.IO.Exception
 import Erbic.IO.Fork
@@ -162,11 +162,11 @@ instance SockService Socket where
   ssAccept s = do (s', sa') <- accept s
                   return (s', show sa')
 
-  -- FIXME: Semantics changed from
-  -- with moving from import Network.Socket.recv
-  -- to Network.Socket.ByteString.recv
-  --ssRead s len = (RRData . unpack <$> recv s len) `catch` handler
-  ssRead s len = (RRData . fst <$> Network.Socket.recvLen s len) `catch` handler
+  ssRead s len = (do bs <- recv s len
+                     if B.null bs
+                       then return RRClosed
+                       else return $ RRData $ B.unpack bs) `catch` handler
+
     where
       handler :: IOException -> IO ReadRes
       handler e = case ioe_type e of
