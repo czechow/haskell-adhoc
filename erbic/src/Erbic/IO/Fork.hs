@@ -31,7 +31,6 @@ tpfork action iorTpi =
       tid <- myThreadId
       atomicModifyIORef' iorTpi $ \tis -> (M.insert tid mv tis, ())
 
-
     finish = do
       tid <- myThreadId
       mmv <- atomicModifyIORef' iorTpi $ \tis -> let ret = M.lookup tid tis

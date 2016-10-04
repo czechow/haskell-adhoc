@@ -12,6 +12,7 @@ import qualified Data.Map.Strict as M
 import Data.IORef
 import qualified Data.Set as S
 import System.Timeout
+import Control.Exception (getMaskingState, MaskingState, MaskingState(Unmasked))
 
 -- FIXME: figure out a way to add a timeout to the tests
 -- FIXME: check async interrupt status!
@@ -41,6 +42,22 @@ prop_stopThread_ok = forAll gen_stopThread $ \args -> monadicIO $ do
   _ <- run $ mapM readMVar mvars
   run $ allFinished tids
   assert True
+
+prop_tfork_maskState_ok :: Property
+prop_tfork_maskState_ok = forAll gen_stopThread $ \args -> monadicIO $ do
+  (tids, mvars, mvsts) <-
+    run $ unzip3 <$> mapM
+    (\_ -> (do mvst <- newEmptyMVar :: IO (MVar MaskingState)
+               (tid, mv) <- tfork $ do getMaskingState >>= putMVar mvst
+                                       return()
+               return (tid, mv, mvst))) args
+
+  _ <- run $ mapM readMVar mvars
+  run $ allFinished tids
+
+  res <- run $ all (== Unmasked) <$> mapM readMVar mvsts
+  assert res
+
 
 
 
@@ -90,12 +107,24 @@ prop_stopThreadPool = forAll gen_tfork $ \kts -> monadicIO $ do
   tpi' <- run $ readIORef iortpi
   assert $ M.null tpi'
 
-
-
-
   (run $ timeout 1000000 $ allFinished tids) >>= \case
     Just _ -> assert True
     Nothing -> assert False
+
+prop_tpfork_maskState_ok :: Property
+prop_tpfork_maskState_ok = forAll gen_stopThread $ \args -> monadicIO $ do
+  iortpi <- run $ newIORef (M.empty :: ThreadPoolInfo)
+  (tids, mvsts) <-
+    run $ unzip <$> mapM
+    (\_ -> (do mvst <- newEmptyMVar :: IO (MVar MaskingState)
+               tid <- tpfork (do getMaskingState >>= putMVar mvst
+                                 return()) iortpi
+               return (tid, mvst))) args
+
+  run $ allFinished tids
+
+  res <- run $ all (== Unmasked) <$> mapM readMVar mvsts
+  assert res
 
 
 -------------------------------------------------------------------------------

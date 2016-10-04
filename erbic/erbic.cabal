@@ -62,7 +62,6 @@ test-suite test
                      , containers
                      , QuickCheck
   other-modules:       Erbic.Data.Msg.ScanMsgProp
-                     , Dummy
                      , MonadicProp
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall
   default-language:    Haskell2010
