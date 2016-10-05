@@ -15,7 +15,6 @@ import System.Timeout
 import Control.Exception (getMaskingState, MaskingState, MaskingState(Unmasked))
 
 -- FIXME: figure out a way to add a timeout to the tests
--- FIXME: check async interrupt status!
 -- FIXME: Thread pool: prevent adding new threads once stop is in progress (?)
 -------------------------------------------------------------------------------
 --                                Properties
