@@ -24,3 +24,4 @@ Haskell rocks!
 :set stop :list => print prog listing on hitting a breakpoint
 
 :delete * => delete all breakpoints
+
