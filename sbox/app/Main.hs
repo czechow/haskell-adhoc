@@ -4,6 +4,8 @@ module Main where
 import Criterion.Main
 import qualified Test.QuickCheck as QC
 import Test.QuickCheck.Arbitrary (Arbitrary)
+import Control.Monad.Except
+import Control.Concurrent
 
 --import MyFree
 
@@ -54,3 +56,66 @@ instance Arbitrary TestCommand where
   arbitrary = QC.frequency [ (5, pure CloseSession)
                            , (10, DelaySecs <$> QC.choose (0, 30))
                            , (85, TC <$> QC.arbitrary )]
+
+
+type IOEitherString = ExceptT String IO
+data SessionStartupConf = SessionStartupConf Type Int
+                        deriving Show
+
+data Type = SPARK
+          | PYTHON
+          | R
+          deriving Show
+
+type SessionData = String
+data Session a = Session SessionData
+               deriving Show
+
+data CREATED
+data IDLE
+data RUNNING
+data CLOSED
+
+newSession :: Type -> IOEitherString (Session CREATED)
+newSession t = do
+  liftIO $ putStrLn $ "Creating a session of type [" ++ show t ++ "]"
+  return $ Session ""
+
+type SessionId = Int
+type SessionStatus = String
+
+sessionStatus :: SessionId -> IOEitherString SessionStatus
+sessionStatus sId = do
+  let x = liftIO $ (do putStrLn $ "Fake request to HTTP server"; return "ok")
+  x
+
+type Seconds = Int
+
+waitForSession :: Seconds -> ((Session CREATED) -> Bool) -> Session CREATED
+               -> IOEitherString (Session RUNNING)
+waitForSession 0 _ _ = throwError "Timed out waiting for session"
+waitForSession n p s@(Session ds)
+  | p s = return $ Session ds
+  | otherwise = do
+      liftIO $ threadDelay $ 1000 * 1000
+      undefined
+
+oper1 :: String -> IOEitherString Int
+oper1 x = do
+  liftIO $ putStrLn $ "oper1: a is [" ++ show x ++ "]"
+  if (x == "df")
+    then throwError "This sucks"
+    else return 5
+
+oper2 :: Show a => a -> IOEitherString String
+oper2 x = do
+  liftIO $ putStrLn $ "oper2: a is [" ++ show x ++ "]"
+  return $ show x
+
+
+myFun :: String -> IO ()
+myFun x = do
+  let z1 = runExceptT $ (oper1 >=> oper2 >=> oper2 >=> oper2) x
+  --x <- runExceptT $ oper1 "x"
+  y <- z1
+  putStrLn $ "y is " ++ show y
