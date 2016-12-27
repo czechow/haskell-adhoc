@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Model.Rest where
 
@@ -16,6 +17,9 @@ import Text.Read (readMaybe)
 
 newtype SessionId = SessionId Int
                   deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SessionId
+instance FromJSON SessionId
 
 unSessionId :: SessionId -> Int
 unSessionId (SessionId v) = v
@@ -58,13 +62,24 @@ data Session a = Session { id :: SessionId
                          , kind :: SessionKind
                          , proxyUser :: Maybe UserName
                          , config :: Maybe (M.Map String String)
+                         , state :: SessionState
                          }
                deriving (Show, Generic)
 
-instance ToJSON SessionId
-instance FromJSON SessionId
+
 instance ToJSON (Session a)
-instance FromJSON (Session a)
+
+
+data SessionState = NOT_STARTED
+                  | STARTING
+                  | IDLE
+                  | BUSY
+                  | ERROR
+                  | DEAD
+                  deriving (Show, Eq, Ord, Generic)
+
+instance ToJSON SessionState where
+  toJSON ss = String $ T.pack $ map toLower $ show ss
 
 
 -- Used in response to GET /sessions
@@ -75,7 +90,14 @@ data Sessions a = Sessions { total :: Int
 
 instance ToJSON (Sessions a)
 
+
 data SessionDeleted = SessionDeleted { msg :: String }
                     deriving (Show, Generic)
 
 instance ToJSON SessionDeleted
+
+
+data Session2 a = Session2 { id2 :: SessionId
+                           , kind :: a
+                           }
+                deriving (Show)

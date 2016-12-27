@@ -17,9 +17,16 @@ import Data.IORef
 import Control.Monad.IO.Class
 import qualified Network.HTTP.Types as HT
 import qualified Data.ByteString.Char8 as T
+import Control.Concurrent
+       (threadDelay, forkIO, ThreadId, killThread, myThreadId, forkFinally)
+import Control.Monad (void)
+import qualified Data.Set as S
+import Data.List (intercalate)
 
 import Model.Rest
 
+
+-- FIXME: change me to Control.Concurrent.Async
 
 data SessionsState a = SessionsState { nextId :: SessionId
                                      , sessionMap :: M.Map SessionId (Session a)
@@ -32,24 +39,95 @@ createSession :: SessionConfig -> SessionsState a
 createSession (SessionConfig k pu c) (SessionsState sId sm) =
   (SessionsState sId' (M.insert sId s sm), s)
   where
-    s = Session sId k pu c
+    s = Session sId k pu c NOT_STARTED
     sId' = SessionId $ succ $ unSessionId sId
 
--- FIXME: change to record syntax
+
 deleteSession :: SessionId -> SessionsState a
               -> (SessionsState a, Maybe SessionId)
-deleteSession sId (SessionsState x sm)
-  | M.member sId sm = (SessionsState x (M.delete sId sm), Just sId)
-  | otherwise = (SessionsState x sm, Nothing)
+deleteSession sId ss
+  | M.member sId sm = (ss { sessionMap = M.delete sId sm }, Just sId)
+  | otherwise = (ss, Nothing)
+  where
+    sm = sessionMap ss
+
+data SessionStatesFrom = AllStates
+                       | Set (S.Set SessionState)
+                       deriving (Show, Eq, Ord)
+
+
+-- FIXME: lenses would be nice here
+changeSessionState :: SessionId
+                   -> SessionStatesFrom
+                   -> SessionState
+                   -> SessionsState a
+                   -> (SessionsState a, Maybe SessionState)
+changeSessionState sId fromStates toState ss =
+  case M.lookup sId sm of
+    Just session -> case fromStates of
+      AllStates -> success session
+      Set allowedStates -> if S.member (state session) allowedStates
+                           then success session
+                           else failure
+    Nothing -> failure
+  where
+    sm = sessionMap ss
+    success s' =
+      (ss { sessionMap = M.adjust (f toState) sId sm }, Just (state s'))
+    failure = (ss, Nothing)
+    f st' s' = s' { state = st' }
+
+
+doStartSession :: Session a -> IORef (SessionsState a) -> IO ()
+doStartSession s ior = do
+  threadDelay $ 1000 * 1000 * 1
+  void $ atomicModifyIORef ior (changeSessionState (id s) AllStates STARTING)
+  threadDelay $ 1000 * 1000 * 50
+  void $ atomicModifyIORef ior
+    (changeSessionState (id s) (Set $ S.singleton STARTING) IDLE)
 
 
 initialSessionsState :: SessionsState a
 initialSessionsState = SessionsState (SessionId 0) M.empty
 
 
+emptyWorkerPool :: M.Map SessionId ThreadId
+emptyWorkerPool = M.empty
+
+workerPoolScanner :: IORef (M.Map SessionId ThreadId) -> IORef (SessionsState a)
+                  -> IO ()
+workerPoolScanner wpr ssr = do
+  wp <- readIORef wpr
+  sIds <- M.keysSet . sessionMap <$> readIORef ssr
+  putStrLn $ "Sessions: " ++
+             (intercalate "," $ map (show . unSessionId) $ S.toList sIds)
+  putStrLn $ "Workers: " ++
+             (intercalate "," $ map (show . unSessionId) $ S.toList . M.keysSet $ wp)
+  mapM_ (dispose wp) $ M.keysSet wp S.\\ sIds
+  threadDelay $ 1000 * 1000 * 1
+  workerPoolScanner wpr ssr
+  where
+    dispose wp' sId = case M.lookup sId wp' of
+      Just tId -> do
+        atomicModifyIORef' wpr $ \m -> (M.delete sId m, ())
+        killThread tId
+      Nothing -> return ()
+
+
+newWorker :: IORef (M.Map SessionId ThreadId) -> SessionId -> IO ()
+          -> IO ThreadId
+newWorker wpr sId action = do
+  forkFinally (do tId <- myThreadId
+                  void $ atomicModifyIORef' wpr $ \m -> (M.insert sId tId m, ())
+                  action)
+    (\_ -> void $ atomicModifyIORef' wpr $ \m -> (M.delete sId m, ()))
+
+
 main :: IO ()
 main = do
   sessionsRef <- newIORef initialSessionsState
+  workerPoolRef <- newIORef emptyWorkerPool
+  void $ forkIO $ workerPoolScanner workerPoolRef sessionsRef
   scotty 8998 $ do
     get "/sessions" $ do
       ss <-
@@ -73,13 +151,6 @@ main = do
     post "/sessions" $ do
       sc <- WS.jsonData :: ActionM SessionConfig
       s <- liftIO $ atomicModifyIORef sessionsRef $ createSession sc
+      liftIO $ void $ newWorker workerPoolRef (id s) $
+                        doStartSession s sessionsRef
       WS.json s
-
--- ============================================================================
---                                Helpers
--- ============================================================================
-
-lookupMaxKey :: Ord k => M.Map k a -> Maybe k
-lookupMaxKey m
-  | M.null m = Nothing
-  | otherwise = Just $ maximum $ M.keysSet m
