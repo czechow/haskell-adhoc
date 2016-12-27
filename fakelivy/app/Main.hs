@@ -17,11 +17,13 @@ import Data.IORef
 import Control.Monad.IO.Class
 import qualified Network.HTTP.Types as HT
 import qualified Data.ByteString.Char8 as T
-import Control.Concurrent
-       (threadDelay, forkIO, ThreadId, killThread, myThreadId, forkFinally)
+import Control.Concurrent (threadDelay)
+--       (threadDelay, forkIO, ThreadId, killThread, myThreadId, forkFinally)
 import Control.Monad (void)
 import qualified Data.Set as S
 import Data.List (intercalate)
+import qualified Control.Concurrent.Async as A
+--import Control.Exception (finally, bracket, bracket_)
 
 import Model.Rest
 
@@ -91,66 +93,72 @@ initialSessionsState :: SessionsState a
 initialSessionsState = SessionsState (SessionId 0) M.empty
 
 
-emptyWorkerPool :: M.Map SessionId ThreadId
+emptyWorkerPool :: M.Map SessionId (A.Async ())
 emptyWorkerPool = M.empty
 
-workerPoolScanner :: IORef (M.Map SessionId ThreadId) -> IORef (SessionsState a)
+
+workerPoolScanner :: IORef (M.Map SessionId (A.Async ()))
+                  -> IORef (SessionsState a)
                   -> IO ()
 workerPoolScanner wpr ssr = do
   wp <- readIORef wpr
   sIds <- M.keysSet . sessionMap <$> readIORef ssr
   putStrLn $ "Sessions: " ++
              (intercalate "," $ map (show . unSessionId) $ S.toList sIds)
-  putStrLn $ "Workers: " ++
-             (intercalate "," $ map (show . unSessionId) $ S.toList . M.keysSet $ wp)
-  mapM_ (dispose wp) $ M.keysSet wp S.\\ sIds
+  putStrLn $ "Workers:  " ++
+             (intercalate "," $ map (show . unSessionId) $
+                              S.toList . M.keysSet $ wp)
+  void $ A.mapConcurrently (dispose wp) $ S.toList (M.keysSet wp S.\\ sIds)
   threadDelay $ 1000 * 1000 * 1
   workerPoolScanner wpr ssr
   where
     dispose wp' sId = case M.lookup sId wp' of
-      Just tId -> do
+      Just asc -> do
+        A.cancel asc
         atomicModifyIORef' wpr $ \m -> (M.delete sId m, ())
-        killThread tId
       Nothing -> return ()
 
 
-newWorker :: IORef (M.Map SessionId ThreadId) -> SessionId -> IO ()
-          -> IO ThreadId
+newWorker :: IORef (M.Map SessionId (A.Async ())) -> SessionId -> IO ()
+          -> IO (A.Async ())
 newWorker wpr sId action = do
-  forkFinally (do tId <- myThreadId
-                  void $ atomicModifyIORef' wpr $ \m -> (M.insert sId tId m, ())
-                  action)
-    (\_ -> void $ atomicModifyIORef' wpr $ \m -> (M.delete sId m, ()))
-
+  a <- A.async action
+  atomicModifyIORef' wpr $ \m -> (M.insert sId a m, ())
+  return a
 
 main :: IO ()
 main = do
   sessionsRef <- newIORef initialSessionsState
   workerPoolRef <- newIORef emptyWorkerPool
-  void $ forkIO $ workerPoolScanner workerPoolRef sessionsRef
-  scotty 8998 $ do
-    get "/sessions" $ do
-      ss <-
-        liftIO $ map snd . M.toAscList . sessionMap <$> readIORef sessionsRef
-      WS.json $ Sessions (length ss) ss
-    get "/sessions/:n" $ do
-      sId <- WS.param "n"
-      s <-
-        liftIO $ M.lookup (SessionId sId) . sessionMap <$> readIORef sessionsRef
-      case s of
-        Just s' -> WS.json s'
-        Nothing -> status $ HT.Status 404 $
-                            T.pack $ "No session found with id " ++ show sId
-    delete "/sessions/:n" $ do
-      n <- WS.param "n"
-      m <- liftIO $ atomicModifyIORef sessionsRef $ deleteSession $ SessionId n
-      case m of
-        Just _ -> WS.json $ SessionDeleted "deleted"
-        Nothing -> next
+  A.withAsync (workerPoolScanner workerPoolRef sessionsRef)
+              (\_ -> action sessionsRef workerPoolRef)
+  where
+    action sessionsRef workerPoolRef = do
+      scotty 8998 $ do
+        get "/sessions" $ do
+          ss <- liftIO $
+                map snd . M.toAscList . sessionMap <$> readIORef sessionsRef
+          WS.json $ Sessions (length ss) ss
 
-    post "/sessions" $ do
-      sc <- WS.jsonData :: ActionM SessionConfig
-      s <- liftIO $ atomicModifyIORef sessionsRef $ createSession sc
-      liftIO $ void $ newWorker workerPoolRef (id s) $
-                        doStartSession s sessionsRef
-      WS.json s
+        get "/sessions/:n" $ do
+          sId <- WS.param "n"
+          s <- liftIO $
+               M.lookup (SessionId sId) . sessionMap <$> readIORef sessionsRef
+          case s of
+            Just s' -> WS.json s'
+            Nothing -> status $ HT.Status 404 $
+                              T.pack $ "No session found with id " ++ show sId
+        delete "/sessions/:n" $ do
+          n <- WS.param "n"
+          m <- liftIO $
+               atomicModifyIORef sessionsRef $ deleteSession $ SessionId n
+          case m of
+            Just _ -> WS.json $ SessionDeleted "deleted"
+            Nothing -> next
+
+        post "/sessions" $ do
+          sc <- WS.jsonData :: ActionM SessionConfig
+          s <- liftIO $ atomicModifyIORef sessionsRef $ createSession sc
+          liftIO $ void $ newWorker workerPoolRef (id s) $
+            doStartSession s sessionsRef
+          WS.json s

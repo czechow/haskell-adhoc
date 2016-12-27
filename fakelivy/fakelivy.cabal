@@ -33,6 +33,7 @@ executable fakelivy-exe
                      , containers
                      , bytestring
                      , http-types
+                     , async
                      , aeson
   default-language:    Haskell2010
 
