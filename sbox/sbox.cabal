@@ -15,16 +15,33 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules: AhAeson
+  exposed-modules:     AhAeson
+                     , Parse
+                     , MndsIO
+                     , Qq
+                     , Tvars
+                     , Spike
+                     , MultiMap
+                     , Flog
+                     , JavaParse
   build-depends:       base >= 4.7 && < 5
                      , free
                      , aeson
+                     , text
+                     , containers
+                     , unordered-containers
                      , wreq
+                     , template-haskell
                      , http-client
                      , lens
                      , mtl
                      , time
+                     , parsec
                      , clock
+                     , interpolatedstring-perl6
+                     , stm
+                     , language-java
+                     , fast-logger
   default-language:    Haskell2010
 
 executable sbox
@@ -32,9 +49,10 @@ executable sbox
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -O2
   build-depends:       base
+                     , mtl
                      , sbox
                      , criterion
-                     , QuickCheckexit
+                     , QuickCheck
   default-language:    Haskell2010
 
 test-suite sbox-test

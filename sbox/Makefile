@@ -1,7 +1,8 @@
 TARGET=sbox
 
 build:
-	stack --verbose $@
+	@#stack --verbose $@
+	stack $@
 
 .PHONY: test
 test:
@@ -18,3 +19,6 @@ bench: build
 
 repl:
 	stack ghci --main-is $(TARGET):exe:$(TARGET)
+
+tags:
+	hasktags --etags src app

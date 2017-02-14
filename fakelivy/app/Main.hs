@@ -18,22 +18,26 @@ import Control.Monad.IO.Class
 import qualified Network.HTTP.Types as HT
 import qualified Data.ByteString.Char8 as T
 import Control.Concurrent (threadDelay)
---       (threadDelay, forkIO, ThreadId, killThread, myThreadId, forkFinally)
 import Control.Monad (void)
 import qualified Data.Set as S
 import Data.List (intercalate)
 import qualified Control.Concurrent.Async as A
---import Control.Exception (finally, bracket, bracket_)
 
 import Model.Rest
 
-
--- FIXME: change me to Control.Concurrent.Async
 
 data SessionsState a = SessionsState { nextId :: SessionId
                                      , sessionMap :: M.Map SessionId (Session a)
                                      }
                      deriving (Show)
+
+
+type WorkerPool = M.Map SessionId (A.Async ())
+
+
+data SessionStatesFrom = AllStates
+                       | Set (S.Set SessionState)
+                       deriving (Show, Eq, Ord)
 
 
 createSession :: SessionConfig -> SessionsState a
@@ -53,9 +57,6 @@ deleteSession sId ss
   where
     sm = sessionMap ss
 
-data SessionStatesFrom = AllStates
-                       | Set (S.Set SessionState)
-                       deriving (Show, Eq, Ord)
 
 
 -- FIXME: lenses would be nice here
@@ -83,9 +84,9 @@ changeSessionState sId fromStates toState ss =
 doStartSession :: Session a -> IORef (SessionsState a) -> IO ()
 doStartSession s ior = do
   threadDelay $ 1000 * 1000 * 1
-  void $ atomicModifyIORef ior (changeSessionState (id s) AllStates STARTING)
+  void $ atomicModifyIORef' ior (changeSessionState (id s) AllStates STARTING)
   threadDelay $ 1000 * 1000 * 50
-  void $ atomicModifyIORef ior
+  void $ atomicModifyIORef' ior
     (changeSessionState (id s) (Set $ S.singleton STARTING) IDLE)
 
 
@@ -93,13 +94,11 @@ initialSessionsState :: SessionsState a
 initialSessionsState = SessionsState (SessionId 0) M.empty
 
 
-emptyWorkerPool :: M.Map SessionId (A.Async ())
+emptyWorkerPool :: WorkerPool
 emptyWorkerPool = M.empty
 
 
-workerPoolScanner :: IORef (M.Map SessionId (A.Async ()))
-                  -> IORef (SessionsState a)
-                  -> IO ()
+workerPoolScanner :: IORef WorkerPool -> IORef (SessionsState a) -> IO ()
 workerPoolScanner wpr ssr = do
   wp <- readIORef wpr
   sIds <- M.keysSet . sessionMap <$> readIORef ssr
@@ -119,21 +118,22 @@ workerPoolScanner wpr ssr = do
       Nothing -> return ()
 
 
-newWorker :: IORef (M.Map SessionId (A.Async ())) -> SessionId -> IO ()
-          -> IO (A.Async ())
+newWorker :: IORef WorkerPool -> SessionId -> IO () -> IO (A.Async ())
 newWorker wpr sId action = do
   a <- A.async action
   atomicModifyIORef' wpr $ \m -> (M.insert sId a m, ())
   return a
+
 
 main :: IO ()
 main = do
   sessionsRef <- newIORef initialSessionsState
   workerPoolRef <- newIORef emptyWorkerPool
   A.withAsync (workerPoolScanner workerPoolRef sessionsRef)
-              (\_ -> action sessionsRef workerPoolRef)
-  where
-    action sessionsRef workerPoolRef = do
+              (\_ -> httpActions sessionsRef workerPoolRef)
+
+httpActions :: IORef (SessionsState a) -> IORef WorkerPool -> IO ()
+httpActions sessionsRef workerPoolRef = do
       scotty 8998 $ do
         get "/sessions" $ do
           ss <- liftIO $
@@ -151,14 +151,14 @@ main = do
         delete "/sessions/:n" $ do
           n <- WS.param "n"
           m <- liftIO $
-               atomicModifyIORef sessionsRef $ deleteSession $ SessionId n
+               atomicModifyIORef' sessionsRef $ deleteSession $ SessionId n
           case m of
             Just _ -> WS.json $ SessionDeleted "deleted"
             Nothing -> next
 
         post "/sessions" $ do
           sc <- WS.jsonData :: ActionM SessionConfig
-          s <- liftIO $ atomicModifyIORef sessionsRef $ createSession sc
+          s <- liftIO $ atomicModifyIORef' sessionsRef $ createSession sc
           liftIO $ void $ newWorker workerPoolRef (id s) $
             doStartSession s sessionsRef
           WS.json s
