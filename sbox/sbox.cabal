@@ -25,6 +25,7 @@ library
                      , Flog
                      , Runner
                      , JavaParse
+                     , Tc
                      , Qc
                      , RankN
   build-depends:       base >= 4.7 && < 5
