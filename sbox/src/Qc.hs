@@ -5,40 +5,26 @@ module Qc where
 
 import Test.QuickCheck
 import Control.Monad.State
-import Test.QuickCheck.Monadic
-import qualified Data.Set as S
+import Test.QuickCheck.Monadic hiding (assert)
+import qualified Test.QuickCheck.Monadic as QC (assert)
 import qualified Data.Map.Strict as M
 import System.Random (newStdGen, randomRs)
 import Data.IORef -- FIXME
+import Data.Maybe (isJust, isNothing)
 
-type LioState = State (S.Set Int)
 
-data Lio = Li Int
-         | Lo Int
+data LoginCreds = LcCorrect UserName Password
+                | LcWrongUn Password
+                | LcWrongPw UserName
+                | LcNoCreds
+                deriving Show
+
+data Op = Li Int
+        | Lo Int
+        | Sl Int
          deriving Show
 
-
-prop :: Property
-prop = once $ forAll (mapM myGen [1..8]) $ \_ ->
---  x > 8 ==> x > 2
-  True
-
-propM :: PropertyM LioState Int
-propM = run $ state $ \s -> (13, S.insert 1 s)
-
-prop2 :: Property
-prop2 = once $ monadic (\x -> evalState x S.empty) $ do
-  x <- pick (myGen 1)
-  monitor (counterexample $ "Failing input:" ++ show x)
-  case x of
-    Li i -> do run $ do state $ \s -> ((), S.insert i s)
-    Lo _ -> do assert $ False == True
-
-prop3 :: Property
-prop3 = once $ monadicIO $ do
-  x <- pick $ mapM myGen [1 .. 32]
-  monitor $ counterexample $ "Failing input:" ++ (show $ head x)
-  assert $ False == False
+type AtState = StateT (M.Map Int AuthToken) IO
 
 data Application a = Application { livy :: a }
 
@@ -52,13 +38,16 @@ type AtToUn = M.Map AuthToken UserName
 
 data Logic = Logic (IORef AtToUn)
 
-config :: M.Map UserName Password
-config = M.fromList [("un", "pw")]
+
+-- Logic here
 
 class HasSecApi l where
   login :: l -> (UserName, Password) -> IO (HttpCode, Maybe AuthToken)
   logout :: l -> AuthToken -> IO HttpCode
+  sessionList :: l -> AuthToken -> IO (HttpCode, [String])
+
   checkAuth :: l -> AuthToken -> IO (Maybe UserName)
+
 
 instance HasSecApi Logic where
   login (Logic atToUnRef) (un, pw) =
@@ -74,77 +63,107 @@ instance HasSecApi Logic where
     Just _ -> atomicModifyIORef' atToUnRef $ \m -> (M.delete at m, HttpCode 200)
     Nothing -> return $ HttpCode 403
 
+  sessionList l at = checkAuth l at >>= \case
+    Just _ -> return (HttpCode 200, [""])
+    Nothing -> return (HttpCode 403, [])
+
   checkAuth (Logic atToUnRef) at = M.lookup at <$> readIORef atToUnRef
 
-prop' :: (HasSecApi a) => Application a -> (Lio -> Property)
-prop' app s@(Li i) =
-  counterexample ("At input: " ++ show s) $ ioProperty $ do
-    (code, at) <- login (livy app) ("un", "pw")
-    -- Now, trace the state changes as well
-    return $ code === HttpCode 200
 
-prop' app s@(Lo i) = ioProperty $ do
-  code <- logout (livy app) ("at")
-  return $ counterexample ("At input: " ++ show s) $ code === HttpCode 200
+-- Tests here
+
+config :: M.Map UserName Password
+config = M.fromList [("un", "pw"), ("un2", "pw2")]
 
 
+propSecLogin :: Property
+propSecLogin = forAll loginCredsGen $ \lc -> ioProperty $ do
+  app <- mkApp
+  tryLogin app lc
+  where
+    tryLogin app (LcCorrect un pw) = do
+      (code, at'm) <- login (livy app) (un, pw)
+      return $ code === HttpCode 200 .&&. isJust at'm
+    tryLogin app (LcWrongUn pw) = do
+      (code, at'm) <- login (livy app) ("<wrong>", pw)
+      return $ code === HttpCode 403 .&&. isNothing at'm
+    tryLogin app (LcWrongPw un) = do
+      (code, at'm) <- login (livy app) (un, "<wrong>")
+      return $ code === HttpCode 403 .&&. isNothing at'm
+    tryLogin app LcNoCreds = do
+      (code, at'm) <- login (livy app) ("", "")
+      return $ code === HttpCode 403 .&&. isNothing at'm
 
-type MyS = StateT (M.Map Int AuthToken) IO
 
-prop'' :: (HasSecApi a) => Application a -> Lio -> PropertyM MyS ()
-prop'' app s@(Li i) = do
-  (code, at'm) <- liftIO $ login (livy app) ("un", "pw")
-  myAssert ("At input: " ++ show s) code $ HttpCode 200
+propSecOperM :: (HasSecApi a) => Application a -> Op -> PropertyM AtState ()
+propSecOperM app s@(Li i) = do
+  creds <- pick $ elements $ M.toList config
+  (code, at'm) <- liftIO $ login (livy app) creds
+  assertMsg ("At input: " ++ show s) code $ HttpCode 200
   case at'm of
     Just at -> run $ state $ \m -> ((), M.insert i at m)
     Nothing -> return ()
 
-prop'' app s@(Lo i) = do
+propSecOperM app s@(Lo i) = do
   (expCode, at'm) <- run $ state $ \m -> case M.lookup i m of
     Just at -> ((HttpCode 200, Just at), M.delete i m)
     Nothing -> ((HttpCode 403, Nothing), m)
   case at'm of
     Just at -> do code <- liftIO $ logout (livy app) at
-                  myAssert ("At input: " ++ show s) code $ expCode
-    Nothing -> do code <- liftIO $ logout (livy app) "<unknown at>"
-                  myAssert ("At input: " ++ show s) code $ expCode
+                  assertMsg ("At input: " ++ show s) code expCode
+    Nothing -> do code <- liftIO $ logout (livy app) "<unknown>"
+                  assertMsg ("At input: " ++ show s) code expCode
+
+propSecOperM app s@(Sl i) = (run $ M.lookup i <$> get) >>= \case
+  Just at -> do (code, _) <- liftIO $ sessionList (livy app) at
+                assertMsg ("At input: " ++ show s) code (HttpCode 200)
+  Nothing -> do (code, _) <- liftIO $ sessionList (livy app) "<unknown>"
+                assertMsg ("At input: " ++ show s) code (HttpCode 403)
+
+propSecOpers :: Property
+propSecOpers = forAll (opsGen 32) $ \lios -> ioProperty $ do
+  app <- mkApp
+  return $ monadic runner $ mapM (propSecOperM app) lios
+  where
+    runner :: AtState Property -> Property
+    runner m = ioProperty $ evalStateT m M.empty
 
 
-myAssert :: (Eq a, Show a, Monad m) => String -> a -> a -> PropertyM m ()
-myAssert d x y
-  | x == y = assert $ x == y
+-- Generators
+
+loginCredsGen :: Gen LoginCreds
+loginCredsGen = do
+  (un, pw) <- elements $ M.toList config
+  elements $ [ LcCorrect un pw
+             , LcWrongUn pw
+             , LcWrongPw un
+             , LcNoCreds
+             ]
+
+opsGen :: Int -> Gen [Op]
+opsGen n = take n <$> (shuffle $ concat [lis, los, sls])
+  where lis = map Li [1 .. n]
+        los = map Lo [1 .. n]
+        sls = map Sl [1 .. n]
+
+
+-- Utilities
+
+mkApp :: IO (Application Logic)
+mkApp = do
+  atToUnRef <- newIORef M.empty
+  return $ Application $ Logic atToUnRef
+
+
+assertMsg :: (Eq a, Show a, Monad m) => String -> a -> a -> PropertyM m ()
+assertMsg d x y
+  | x == y = QC.assert $ x == y
   | otherwise = do
       monitor $ counterexample d
       monitor $ counterexample (show x ++ " /= " ++ show y)
-      assert $ x == y
-
-propAll :: (HasSecApi a) => Application a -> Property
-propAll app =
-  forAll (mapM myGen [1..4]) $ \lios -> conjoin $ map (prop' app) lios
-
--- (do
---   x <- run $ state $ \s -> (13, S.insert 1 s)
---   return x
-
-myGen :: Int -> Gen Lio
-myGen  i = f <$> elements [minBound .. maxBound]
-  where
-    f True  = Li i
-    f False = Lo i
+      QC.assert $ x == y
 
 
 go :: IO ()
 go = do
-  atToUnRef <- newIORef M.empty
---  quickCheck $ propAll (Application (Logic atToUnRef))
-  let x = once $ monadic runner $
-          mapM (prop'' (Application (Logic atToUnRef)))
-          [Li 0, Li 1, Lo 0, Lo 1, Lo 3]
-  quickCheck x
-  where
-    runner :: MyS Property -> Property
-    runner m = ioProperty $ evalStateT m M.empty
-    -- runner m = ioProperty $ do
-    --   (p', st) <- runStateT m M.empty
-    --   putStrLn $ "State is: " ++ show st
-    --   return p'
+  quickCheck $ conjoin [propSecLogin, propSecOpers]
